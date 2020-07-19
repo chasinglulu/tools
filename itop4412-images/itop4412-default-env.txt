@@ -1,0 +1,21 @@
+
+arch=arm
+baudrate=115200
+board=itop4412
+board_name=itop4412
+bootcmd=if mmc rescan; then echo SD/MMC found on device ${mmcdev};if run loadbootenv; then echo Loaded environment from ${bootenv};run importbootenv;fi;if test -n $uenvcmd; then echo Running uenvcmd ...;run uenvcmd;fi;if run loadbootscript; then run bootscript; fi; fi;load mmc ${mmcdev} ${loadaddr} uImage; bootm ${loadaddr} 
+bootdelay=2
+bootenv=uEnv.txt
+bootscript=echo Running bootscript from mmc${mmcdev} ...; source ${loadaddr}
+console=ttySAC2,115200n8
+cpu=armv7
+importbootenv=echo Importing environment from mmc ...; env import -t $loadaddr $filesize
+kerneladdr=0x40007000
+loadaddr=0x40007000
+loadbootenv=load mmc ${mmcdev} ${loadaddr} ${bootenv}
+loadbootscript=load mmc ${mmcdev} ${loadaddr} boot.scr
+mmcdev=0
+ramdiskaddr=0x48000000
+rdaddr=0x48000000
+soc=exynos
+vendor=samsung
