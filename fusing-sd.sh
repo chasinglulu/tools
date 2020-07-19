@@ -22,7 +22,7 @@ ENV_POS=1385
 function usage()
 {
     echo "Usage:"
-	echo "    $(basename $0) [-d /dev/sdX] [-i /path/to/images/] [-t board]"
+    echo "    $(basename $0) [-d /dev/sdX] [-i /path/to/images/] [-t board]"
     echo "    -d /dev/sdX to specify block device file for sd card"
     echo "    -i /path/to/images/ to specify image direction, optional"
     echo "    -t board  to specify the kind of board"
@@ -40,8 +40,8 @@ function bl1_fwbl_fusing()
 function bl1_spl_fusing()
 {
     echo "BL1_SPL fusing ..."
-	dd iflag=dsync oflag=dsync if=$IMAGE_DIR/$BL1_SPL_IMG of=$DEVICE seek=$BL1_SPL_POS
-	echo "Finish fusing BL1_SPL image."
+    dd iflag=dsync oflag=dsync if=$IMAGE_DIR/$BL1_SPL_IMG of=$DEVICE seek=$BL1_SPL_POS
+    echo "Finish fusing BL1_SPL image."
 }
 
 function bl2_uboot_fusing()
