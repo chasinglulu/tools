@@ -67,7 +67,16 @@ function main()
 {
     echo "--------------------------[Begin]--------------------------"
     echo "May take a few minutes, wait ..."
-	fusing
+	if [ "$ITOP4412_FUSING" = "true" ]
+	then
+    		bl1_fwbl_fusing
+    		bl1_spl_fusing
+    		bl2_uboot_fusing
+    		tzsw_fusing
+    		env_fusing
+	else
+		fusing
+	fi
     echo "--------------------------[End]----------------------------"
 }
 
