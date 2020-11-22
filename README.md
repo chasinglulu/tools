@@ -11,3 +11,7 @@ mkenvimage -s 16384 -o env.bin default-env.txt
 ```
 # boot.src
 创建u-boot的启动脚本
+mkimage -c none -A arm -T script -d autoboot.cmd boot.scr
+
+# System Image(macroSD Boot)
+创建从SD卡启动的镜像文件
