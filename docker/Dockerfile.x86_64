@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: GPL-2.0+
+# This Dockerfile is used to build an image containing basic stuff to be used
+# to cross build
+
+FROM ubuntu:latest
+LABEL Description=" This image is for cross building inside a container"
+# Make sure apt is happy
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install vim sudo bash kpartx parted -y && \
+    apt-get install bash-completion build-essential -y && \
+    apt-get install make gcc libc6-dev zlib1g-dev python python-dev -y && \
+    apt-get install bear -y
+
+RUN useradd -m -d /home/xen -s /bin/bash -u 1114 -U xen
+RUN apt-get install sudo && \
+    usermod -G sudo xen && \
+    echo "xen:xen" | chpasswd
