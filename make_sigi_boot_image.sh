@@ -34,13 +34,21 @@ set -x
 	sudo parted $IMG_NAME set 6 boot on
 	# userdata partition 923MiB
 	sudo parted -s -a none $IMG_NAME mkpart userdata 304MiB 2046MiB
+	sync
 
 	part_map=$(sudo kpartx -av $IMG_NAME)
 
 	# format filesystem
 	sudo mkfs.vfat /dev/mapper/$(echo "$part_map" | sed -n '5p' | awk '{print $3}')
+	sync
+
 	sudo mkfs.vfat /dev/mapper/$(echo "$part_map" | sed -n '6p' | awk '{print $3}')
+	sync
 	sudo mkfs.ext4 /dev/mapper/$(echo "$part_map" | sed -n '7p' | awk '{print $3}')
+	sync
+	sudo tune2fs -f -O ^metadata_csum /dev/mapper/$(echo "$part_map" | sed -n '7p' | awk '{print $3}')
+	sync
+
 set +x
 
 	echo "=============Successfully make partition"
