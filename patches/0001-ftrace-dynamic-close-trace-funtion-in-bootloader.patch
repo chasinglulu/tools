@@ -1,0 +1,1337 @@
+From 6c23a4793ed0d917bb4241b12e8f52934387b92c Mon Sep 17 00:00:00 2001
+From: "xinlu.wang" <xinlu.wang@horizon.ai>
+Date: Mon, 18 Jul 2022 16:00:12 +0800
+Subject: [PATCH] ftrace: dynamic close trace funtion in bootloader
+
+Signed-off-by: xinlu.wang <xinlu.wang@horizon.ai>
+---
+ arch/arm64/Kconfig.platforms                |  14 +-
+ arch/arm64/boot/dts/hobot/Makefile          |  11 +-
+ arch/arm64/configs/j5_dvb_bringup_defconfig |  13 +-
+ arch/arm64/configs/j5_dvb_rt_defconfig      | 528 --------------------
+ arch/arm64/configs/j5_matrix5_defconfig     |   3 +-
+ arch/arm64/kernel/entry-ftrace.S            |   4 +
+ arch/arm64/kernel/ftrace.c                  |   3 +
+ fs/tracefs/inode.c                          |   4 +
+ include/linux/ftrace.h                      |   1 +
+ include/linux/irqflags.h                    |   7 +-
+ include/linux/trace_events.h                |   2 +
+ kernel/sched/core.c                         |   5 +
+ kernel/trace/blktrace.c                     |   3 +
+ kernel/trace/bpf_trace.c                    |   3 +
+ kernel/trace/ftrace.c                       |   6 +
+ kernel/trace/trace.c                        |  23 +
+ kernel/trace/trace_branch.c                 |   9 +
+ kernel/trace/trace_dynevent.c               |   3 +
+ kernel/trace/trace_events.c                 |   3 +
+ kernel/trace/trace_events_synth.c           |   7 +
+ kernel/trace/trace_functions_graph.c        |   6 +
+ kernel/trace/trace_hwlat.c                  |   3 +
+ kernel/trace/trace_irqsoff.c                |   3 +
+ kernel/trace/trace_kprobe.c                 |   3 +
+ kernel/trace/trace_mmiotrace.c              |   3 +
+ kernel/trace/trace_output.c                 |   3 +
+ kernel/trace/trace_preemptirq.c             |  24 +
+ kernel/trace/trace_printk.c                 |   6 +
+ kernel/trace/trace_sched_wakeup.c           |   3 +
+ kernel/trace/trace_stack.c                  |   3 +
+ kernel/trace/trace_uprobe.c                 |   3 +
+ kernel/tracepoint.c                         |   5 +
+ 32 files changed, 169 insertions(+), 548 deletions(-)
+ mode change 100755 => 100644 arch/arm64/Kconfig.platforms
+ delete mode 100644 arch/arm64/configs/j5_dvb_rt_defconfig
+
+diff --git a/arch/arm64/Kconfig.platforms b/arch/arm64/Kconfig.platforms
+old mode 100755
+new mode 100644
+index 8b533deebbe1..8791b6d1d849
+--- a/arch/arm64/Kconfig.platforms
++++ b/arch/arm64/Kconfig.platforms
+@@ -333,12 +333,18 @@ config ARCH_HOBOT
+ 	  like the Journey 5.
+ 
+ config HOBOT_J5
+-	bool "J5 SOC Support"
++	bool "J5 SoC Support"
+ 	depends on ARCH_HOBOT
+ 	select PINCTRL_HOBOT_J5
+-    select ARM_HOBOT_DMC_DEVFREQ
++	select ARM_HOBOT_DMC_DEVFREQ
+ 	help
+-	  This enables Hobot J5 SOC support.
+-	  You only need to enable this, if you want to support j5 soc.
++	  This enables Hobot J5 SOC support. If you want to support j5 soc,
++	  you need enable this option.
++
++config HOBOT_MATRIX
++	bool "Hobot Matrix platform support"
++	depends on ARCH_HOBOT
++	help
++	  This enables Hobot Matrix platform hardware support.
+ 
+ endmenu
+diff --git a/arch/arm64/boot/dts/hobot/Makefile b/arch/arm64/boot/dts/hobot/Makefile
+index 3e45c7773145..072bde67b772 100644
+--- a/arch/arm64/boot/dts/hobot/Makefile
++++ b/arch/arm64/boot/dts/hobot/Makefile
+@@ -2,11 +2,16 @@
+ ifeq ($(BOOT_MODE),hyper)
+ dtb-$(CONFIG_ARCH_HOBOT) += hobot-j5-hyper-dvb.dtb
+ else
++ifndef CONFIG_HOBOT_MATRIX
+ dtb-$(CONFIG_ARCH_HOBOT) += hobot-j5-dvb.dtb
+ endif
++endif
++
++ifndef CONFIG_HOBOT_MATRIX
+ dtb-$(CONFIG_ARCH_HOBOT) += hobot-j5-dvb-A.dtb hobot-j5-dvb-B.dtb hobot-j5-dvb-C.dtb hobot-j5-dvb-D.dtb
+-dtb-$(CONFIG_ARCH_HOBOT) += hobot-j5-matrix-A.dtb hobot-j5-matrix-B.dtb hobot-j5-matrix-C.dtb hobot-j5-matrix-D.dtb
+-dtb-$(CONFIG_ARCH_HOBOT) += hobot-j5-matrixp2-A.dtb hobot-j5-matrixp2-B.dtb hobot-j5-matrixp2-C.dtb hobot-j5-matrixp2-D.dtb hobot-j5-matrixp2-D-EP.dtb
+-dtb-$(CONFIG_ARCH_HOBOT) += hobot-j5-matrixduo.dtb
+ dtb-$(CONFIG_ARCH_HOBOT) += hobot-j5-cvb.dtb
+ dtb-$(CONFIG_ARCH_HOBOT) += hobot-j5-evm.dtb hobot-j5-evm-rc.dtb hobot-j5-evm-ep.dtb
++endif
++dtb-$(CONFIG_HOBOT_MATRIX) += hobot-j5-matrix-A.dtb hobot-j5-matrix-B.dtb hobot-j5-matrix-C.dtb hobot-j5-matrix-D.dtb
++dtb-$(CONFIG_HOBOT_MATRIX) += hobot-j5-matrixp2-A.dtb hobot-j5-matrixp2-B.dtb hobot-j5-matrixp2-C.dtb hobot-j5-matrixp2-D.dtb hobot-j5-matrixp2-D-EP.dtb
++dtb-$(CONFIG_HOBOT_MATRIX) += hobot-j5-matrixduo.dtb
+diff --git a/arch/arm64/configs/j5_dvb_bringup_defconfig b/arch/arm64/configs/j5_dvb_bringup_defconfig
+index 8d3622f2b139..d3f72ea51178 100644
+--- a/arch/arm64/configs/j5_dvb_bringup_defconfig
++++ b/arch/arm64/configs/j5_dvb_bringup_defconfig
+@@ -164,7 +164,6 @@ CONFIG_CAN_HOBOT=m
+ CONFIG_CAN_HOBOT_STL_J5=m
+ CONFIG_CFG80211=m
+ CONFIG_MAC80211=m
+-CONFIG_MAC80211_LEDS=y
+ CONFIG_NET_9P=y
+ CONFIG_NET_9P_VIRTIO=y
+ CONFIG_FAILOVER=y
+@@ -273,7 +272,6 @@ CONFIG_DP83867_PHY=y
+ # CONFIG_WLAN_VENDOR_TI is not set
+ # CONFIG_WLAN_VENDOR_ZYDAS is not set
+ # CONFIG_WLAN_VENDOR_QUANTENNA is not set
+-# CONFIG_INPUT_LEDS is not set
+ CONFIG_INPUT_EVDEV=y
+ # CONFIG_KEYBOARD_ATKBD is not set
+ CONFIG_KEYBOARD_GPIO=y
+@@ -354,7 +352,6 @@ CONFIG_HOBOT_VIDEOSYS_STL=y
+ CONFIG_HOBOT_LKOF=m
+ CONFIG_LKOF_STL_J5=y
+ CONFIG_HOBOT_ISP_J5=m
+-CONFIG_J5_ISP_STL=y
+ CONFIG_HOBOT_CVSYS=y
+ CONFIG_HOBOT_CVSYS_STL=y
+ CONFIG_HOBOT_VIDEOSTITCH=m
+@@ -376,7 +373,6 @@ CONFIG_MIPI_CSI_STL_J5=y
+ CONFIG_MIPI_CSI_HOST_STL_J5=y
+ CONFIG_MIPI_CSI_DEV_STL_J5=y
+ CONFIG_MIPI_CSI_ERM_STL_J5=y
+-CONFIG_HOBOT_IDU_JPLUS_STL=y
+ CONFIG_FB=y
+ CONFIG_FB_HOBOT_JPLUS=m
+ CONFIG_SOUND=y
+@@ -435,6 +431,7 @@ CONFIG_BPU_CORE=m
+ CONFIG_J5P_BPU=y
+ CONFIG_BPU_FUSA=m
+ CONFIG_HOBOT_IDU_JPLUS=m
++CONFIG_HOBOT_IDU_JPLUS_STL=y
+ CONFIG_HOBOT_DDR_MON=y
+ CONFIG_HOBOT_J5_STL=y
+ CONFIG_HOBOT_SCHED_LOGGER=y
+@@ -494,8 +491,6 @@ CONFIG_NLS_ISO8859_1=y
+ CONFIG_SECURITY=y
+ CONFIG_CRYPTO_USER=m
+ CONFIG_CRYPTO_TEST=m
+-CONFIG_CRYPTO_DH=m
+-CONFIG_CRYPTO_ECDH=m
+ CONFIG_CRYPTO_SM2=m
+ CONFIG_CRYPTO_ECHAINIV=m
+ CONFIG_CRYPTO_XTS=m
+@@ -542,8 +537,10 @@ CONFIG_BOOTPARAM_HUNG_TASK_PANIC=y
+ CONFIG_WQ_WATCHDOG=y
+ CONFIG_TEST_LOCKUP=m
+ # CONFIG_DEBUG_PREEMPT is not set
+-CONFIG_STACKTRACE=y
+ CONFIG_RCU_CPU_STALL_TIMEOUT=30
+-# CONFIG_FTRACE is not set
++CONFIG_FUNCTION_TRACER=y
++CONFIG_IRQSOFF_TRACER=y
++CONFIG_PREEMPT_TRACER=y
++CONFIG_SCHED_TRACER=y
+ # CONFIG_STRICT_DEVMEM is not set
+ CONFIG_MEMTEST=y
+diff --git a/arch/arm64/configs/j5_dvb_rt_defconfig b/arch/arm64/configs/j5_dvb_rt_defconfig
+deleted file mode 100644
+index 3ef6b3df915e..000000000000
+--- a/arch/arm64/configs/j5_dvb_rt_defconfig
++++ /dev/null
+@@ -1,528 +0,0 @@
+-CONFIG_SYSVIPC=y
+-CONFIG_POSIX_MQUEUE=y
+-CONFIG_AUDIT=y
+-CONFIG_NO_HZ_IDLE=y
+-CONFIG_HIGH_RES_TIMERS=y
+-CONFIG_PREEMPT_RT=y
+-CONFIG_IRQ_TIME_ACCOUNTING=y
+-CONFIG_BSD_PROCESS_ACCT=y
+-CONFIG_BSD_PROCESS_ACCT_V3=y
+-CONFIG_TASKSTATS=y
+-CONFIG_TASK_DELAY_ACCT=y
+-CONFIG_TASK_XACCT=y
+-CONFIG_TASK_IO_ACCOUNTING=y
+-CONFIG_IKCONFIG=y
+-CONFIG_IKCONFIG_PROC=y
+-CONFIG_MEMCG=y
+-CONFIG_BLK_CGROUP=y
+-CONFIG_CGROUP_PIDS=y
+-CONFIG_CGROUP_HUGETLB=y
+-CONFIG_CPUSETS=y
+-CONFIG_CGROUP_DEVICE=y
+-CONFIG_CGROUP_CPUACCT=y
+-CONFIG_CGROUP_PERF=y
+-CONFIG_NAMESPACES=y
+-CONFIG_USER_NS=y
+-CONFIG_SCHED_AUTOGROUP=y
+-CONFIG_INITRAMFS_SOURCE="usr/rootfs.cpio.gz"
+-# CONFIG_RD_BZIP2 is not set
+-# CONFIG_RD_LZMA is not set
+-# CONFIG_RD_XZ is not set
+-# CONFIG_RD_LZO is not set
+-# CONFIG_RD_ZSTD is not set
+-CONFIG_CC_OPTIMIZE_FOR_SIZE=y
+-CONFIG_EXPERT=y
+-CONFIG_BPF_SYSCALL=y
+-# CONFIG_SLUB_DEBUG is not set
+-# CONFIG_COMPAT_BRK is not set
+-CONFIG_PROFILING=y
+-CONFIG_ARCH_HOBOT=y
+-CONFIG_HOBOT_J5=y
+-CONFIG_ARM64_VA_BITS_48=y
+-CONFIG_SCHED_MC=y
+-CONFIG_SCHED_SMT=y
+-CONFIG_NR_CPUS=128
+-CONFIG_PARAVIRT=y
+-CONFIG_COMPAT=y
+-CONFIG_ARM64_PSEUDO_NMI=y
+-# CONFIG_EFI is not set
+-CONFIG_HIBERNATION=y
+-CONFIG_PM_AUTOSLEEP=y
+-CONFIG_PM_WAKELOCKS=y
+-CONFIG_PM_WAKELOCKS_LIMIT=0
+-CONFIG_PM_DEBUG=y
+-CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y
+-CONFIG_CPU_IDLE=y
+-CONFIG_ARM_CPUIDLE=y
+-CONFIG_ARM_PSCI_CPUIDLE=y
+-CONFIG_CPU_FREQ=y
+-CONFIG_CPU_FREQ_STAT=y
+-CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y
+-CONFIG_CPU_FREQ_GOV_POWERSAVE=y
+-CONFIG_CPU_FREQ_GOV_USERSPACE=y
+-CONFIG_CPU_FREQ_GOV_ONDEMAND=y
+-CONFIG_CPU_FREQ_GOV_CONSERVATIVE=y
+-CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
+-CONFIG_CPUFREQ_DT=y
+-CONFIG_ARM_SCMI_PROTOCOL=y
+-CONFIG_HOBOT_FIRMWARE=y
+-CONFIG_HOBOT_TEE_CRYPTO=y
+-CONFIG_HOBOT_TEE_SECURE_KEY=y
+-CONFIG_HOBOT_TEE_AKCIPHER=y
+-CONFIG_HOBOT_TEE_SKCIPHER=y
+-CONFIG_HOBOT_TEE_AEAD=y
+-CONFIG_HOBOT_TEE_SHASH=y
+-CONFIG_HOBOT_TEE_DIAGNOSE=y
+-CONFIG_HOBOT_TEE_JPLUS_EFUSE=y
+-CONFIG_ARM64_CRYPTO=y
+-CONFIG_CRYPTO_SHA1_ARM64_CE=y
+-CONFIG_CRYPTO_SHA2_ARM64_CE=y
+-CONFIG_CRYPTO_SHA512_ARM64_CE=m
+-CONFIG_CRYPTO_SHA3_ARM64=m
+-CONFIG_CRYPTO_SM3_ARM64_CE=m
+-CONFIG_CRYPTO_GHASH_ARM64_CE=m
+-CONFIG_CRYPTO_CRCT10DIF_ARM64_CE=m
+-CONFIG_CRYPTO_AES_ARM64_CE_CCM=m
+-CONFIG_CRYPTO_CHACHA20_NEON=m
+-CONFIG_KPROBES=y
+-CONFIG_JUMP_LABEL=y
+-CONFIG_MODULES=y
+-CONFIG_MODULE_UNLOAD=y
+-CONFIG_BLK_DEV_BSGLIB=y
+-CONFIG_BLK_DEV_INTEGRITY=y
+-CONFIG_IOSCHED_BFQ=y
+-CONFIG_BFQ_GROUP_IOSCHED=y
+-# CONFIG_CORE_DUMP_DEFAULT_ELF_HEADERS is not set
+-CONFIG_PAGE_REPORTING=y
+-CONFIG_KSM=y
+-CONFIG_MEMORY_FAILURE=y
+-CONFIG_CMA=y
+-CONFIG_CMA_DEBUGFS=y
+-CONFIG_CMA_AREAS=19
+-CONFIG_NET=y
+-CONFIG_PACKET=y
+-CONFIG_UNIX=y
+-CONFIG_INET=y
+-CONFIG_IP_MULTICAST=y
+-CONFIG_IP_PNP=y
+-CONFIG_IP_PNP_DHCP=y
+-CONFIG_IP_PNP_BOOTP=y
+-CONFIG_IPV6=m
+-CONFIG_NETFILTER=y
+-CONFIG_NF_CONNTRACK=m
+-CONFIG_NF_CONNTRACK_EVENTS=y
+-CONFIG_NETFILTER_XT_TARGET_CHECKSUM=m
+-CONFIG_NETFILTER_XT_TARGET_LOG=m
+-CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=m
+-CONFIG_NETFILTER_XT_MATCH_CONNTRACK=m
+-CONFIG_IP_NF_IPTABLES=m
+-CONFIG_IP_NF_FILTER=m
+-CONFIG_IP_NF_TARGET_REJECT=m
+-CONFIG_IP_NF_NAT=m
+-CONFIG_IP_NF_TARGET_MASQUERADE=m
+-CONFIG_IP_NF_MANGLE=m
+-CONFIG_IP6_NF_IPTABLES=m
+-CONFIG_IP6_NF_FILTER=m
+-CONFIG_IP6_NF_TARGET_REJECT=m
+-CONFIG_IP6_NF_MANGLE=m
+-CONFIG_IP6_NF_NAT=m
+-CONFIG_IP6_NF_TARGET_MASQUERADE=m
+-CONFIG_NET_SCHED=y
+-CONFIG_NET_SCH_CBS=m
+-CONFIG_NET_SCH_ETF=m
+-CONFIG_NET_SCH_TAPRIO=m
+-CONFIG_NET_SCH_MQPRIO=m
+-CONFIG_NET_SCH_INGRESS=m
+-CONFIG_NET_CLS_BASIC=m
+-CONFIG_NET_CLS_FLOWER=m
+-CONFIG_NET_CLS_ACT=y
+-CONFIG_NET_ACT_GACT=m
+-CONFIG_NET_ACT_MIRRED=m
+-CONFIG_NET_ACT_GATE=m
+-CONFIG_DNS_RESOLVER=y
+-CONFIG_NET_SWITCHDEV=y
+-CONFIG_VLAN_8021Q=y
+-CONFIG_BPF_JIT=y
+-CONFIG_CAN=m
+-CONFIG_CAN_HOBOT=m
+-CONFIG_CFG80211=m
+-CONFIG_MAC80211=m
+-CONFIG_MAC80211_LEDS=y
+-CONFIG_NET_9P=y
+-CONFIG_NET_9P_VIRTIO=y
+-CONFIG_FAILOVER=y
+-CONFIG_PCI=y
+-CONFIG_PCIEPORTBUS=y
+-CONFIG_PCIEAER=y
+-CONFIG_PCIE_ECRC=y
+-CONFIG_PCI_DEBUG=y
+-CONFIG_PCIE_HOBOT_RC=y
+-CONFIG_PCIE_HOBOT_EP=y
+-CONFIG_PCIE_HOBOT_DEBUG_FS=y
+-CONFIG_PCI_ENDPOINT=y
+-CONFIG_DEVTMPFS=y
+-CONFIG_DEVTMPFS_MOUNT=y
+-CONFIG_FW_LOADER_USER_HELPER=y
+-CONFIG_FW_LOADER_USER_HELPER_FALLBACK=y
+-CONFIG_BRCMSTB_GISB_ARB=y
+-CONFIG_SIMPLE_PM_BUS=y
+-CONFIG_VEXPRESS_CONFIG=y
+-CONFIG_MTD=y
+-CONFIG_MTD_TESTS=m
+-CONFIG_MTD_CMDLINE_PARTS=y
+-CONFIG_MTD_BLOCK=y
+-CONFIG_FTL=y
+-CONFIG_MTD_CFI_ADV_OPTIONS=y
+-CONFIG_MTD_CFI_GEOMETRY=y
+-# CONFIG_MTD_MAP_BANK_WIDTH_4 is not set
+-# CONFIG_MTD_CFI_I2 is not set
+-CONFIG_MTD_SPI_NOR=y
+-# CONFIG_MTD_SPI_NOR_USE_4K_SECTORS is not set
+-CONFIG_MTD_UBI=y
+-CONFIG_MTD_HYPERBUS=y
+-CONFIG_HBMC_HOBOT=y
+-CONFIG_OF_OVERLAY=y
+-CONFIG_BLK_DEV_LOOP=y
+-CONFIG_BLK_DEV_RAM=y
+-CONFIG_BLK_DEV_RAM_SIZE=409600
+-CONFIG_BLK_DEV_NVME=y
+-CONFIG_SRAM=y
+-CONFIG_EEPROM_AT24=m
+-CONFIG_EEPROM_AT25=m
+-CONFIG_UACCE=m
+-CONFIG_HOBOT_EP_DEVICE_DRIVER=y
+-CONFIG_MD=y
+-CONFIG_BLK_DEV_DM=y
+-CONFIG_DM_ZERO=y
+-CONFIG_DM_VERITY=y
+-CONFIG_DM_VERITY_AVB=y
+-CONFIG_NETDEVICES=y
+-# CONFIG_NET_VENDOR_ALACRITECH is not set
+-# CONFIG_NET_VENDOR_AMAZON is not set
+-# CONFIG_NET_VENDOR_AMD is not set
+-# CONFIG_NET_VENDOR_AQUANTIA is not set
+-# CONFIG_NET_VENDOR_ARC is not set
+-# CONFIG_NET_VENDOR_AURORA is not set
+-# CONFIG_NET_VENDOR_BROADCOM is not set
+-# CONFIG_NET_VENDOR_CADENCE is not set
+-# CONFIG_NET_VENDOR_CAVIUM is not set
+-# CONFIG_NET_VENDOR_CORTINA is not set
+-# CONFIG_NET_VENDOR_EZCHIP is not set
+-# CONFIG_NET_VENDOR_GOOGLE is not set
+-# CONFIG_NET_VENDOR_HISILICON is not set
+-# CONFIG_NET_VENDOR_HUAWEI is not set
+-# CONFIG_NET_VENDOR_INTEL is not set
+-# CONFIG_NET_VENDOR_MARVELL is not set
+-# CONFIG_NET_VENDOR_MELLANOX is not set
+-# CONFIG_NET_VENDOR_MICREL is not set
+-# CONFIG_NET_VENDOR_MICROCHIP is not set
+-# CONFIG_NET_VENDOR_MICROSEMI is not set
+-# CONFIG_NET_VENDOR_NATSEMI is not set
+-# CONFIG_NET_VENDOR_NETRONOME is not set
+-# CONFIG_NET_VENDOR_NI is not set
+-# CONFIG_NET_VENDOR_PENSANDO is not set
+-# CONFIG_NET_VENDOR_QUALCOMM is not set
+-# CONFIG_NET_VENDOR_RENESAS is not set
+-# CONFIG_NET_VENDOR_ROCKER is not set
+-# CONFIG_NET_VENDOR_SAMSUNG is not set
+-# CONFIG_NET_VENDOR_SEEQ is not set
+-# CONFIG_NET_VENDOR_SOLARFLARE is not set
+-# CONFIG_NET_VENDOR_SMSC is not set
+-# CONFIG_NET_VENDOR_SOCIONEXT is not set
+-# CONFIG_NET_VENDOR_STMICRO is not set
+-# CONFIG_NET_VENDOR_SYNOPSYS is not set
+-# CONFIG_NET_VENDOR_VIA is not set
+-# CONFIG_NET_VENDOR_WIZNET is not set
+-# CONFIG_NET_VENDOR_XILINX is not set
+-CONFIG_JPLUS_ETH=y
+-CONFIG_MARVELL_PHY=y
+-# CONFIG_WLAN_VENDOR_ADMTEK is not set
+-# CONFIG_WLAN_VENDOR_ATH is not set
+-# CONFIG_WLAN_VENDOR_ATMEL is not set
+-# CONFIG_WLAN_VENDOR_BROADCOM is not set
+-# CONFIG_WLAN_VENDOR_CISCO is not set
+-# CONFIG_WLAN_VENDOR_INTEL is not set
+-# CONFIG_WLAN_VENDOR_INTERSIL is not set
+-# CONFIG_WLAN_VENDOR_MARVELL is not set
+-# CONFIG_WLAN_VENDOR_MEDIATEK is not set
+-# CONFIG_WLAN_VENDOR_MICROCHIP is not set
+-# CONFIG_WLAN_VENDOR_RALINK is not set
+-# CONFIG_WLAN_VENDOR_REALTEK is not set
+-# CONFIG_WLAN_VENDOR_RSI is not set
+-# CONFIG_WLAN_VENDOR_ST is not set
+-# CONFIG_WLAN_VENDOR_TI is not set
+-# CONFIG_WLAN_VENDOR_ZYDAS is not set
+-# CONFIG_WLAN_VENDOR_QUANTENNA is not set
+-# CONFIG_INPUT_LEDS is not set
+-CONFIG_INPUT_EVDEV=y
+-CONFIG_KEYBOARD_GPIO=y
+-# CONFIG_INPUT_MOUSE is not set
+-CONFIG_VT_HW_CONSOLE_BINDING=y
+-CONFIG_LEGACY_PTY_COUNT=16
+-CONFIG_SERIAL_8250=y
+-CONFIG_SERIAL_8250_CONSOLE=y
+-CONFIG_SERIAL_8250_EXTENDED=y
+-CONFIG_SERIAL_8250_SHARE_IRQ=y
+-CONFIG_SERIAL_8250_DW=y
+-CONFIG_SERIAL_OF_PLATFORM=y
+-CONFIG_SERIAL_AMBA_PL011=y
+-CONFIG_SERIAL_AMBA_PL011_CONSOLE=y
+-CONFIG_SERIAL_XILINX_PS_UART=y
+-CONFIG_SERIAL_XILINX_PS_UART_CONSOLE=y
+-CONFIG_SERIAL_FSL_LPUART=y
+-CONFIG_SERIAL_FSL_LPUART_CONSOLE=y
+-CONFIG_SERIAL_FSL_LINFLEXUART=y
+-CONFIG_SERIAL_FSL_LINFLEXUART_CONSOLE=y
+-CONFIG_SERIAL_DEV_BUS=y
+-CONFIG_VIRTIO_CONSOLE=y
+-CONFIG_HW_RANDOM=y
+-CONFIG_TCG_TPM=y
+-# CONFIG_HW_RANDOM_TPM is not set
+-CONFIG_TCG_TIS_I2C_INFINEON=y
+-CONFIG_I2C_CHARDEV=y
+-CONFIG_I2C_DESIGNWARE_PLATFORM=y
+-CONFIG_SPI=y
+-CONFIG_SPI_DEBUG=y
+-CONFIG_SPI_DESIGNWARE=y
+-CONFIG_SPI_DW_MMIO_DMA=y
+-CONFIG_SPI_DW_MMIO=y
+-CONFIG_SPI_HOBOT_OSPI=m
+-# CONFIG_SPI_SPIDEV is not set
+-CONFIG_SPI_SLAVE=y
+-CONFIG_PPS_CLIENT_GPS=y
+-CONFIG_PTP_1588_CLOCK=y
+-CONFIG_PINCTRL=y
+-CONFIG_PINCTRL_HOBOT_J5_TEST=m
+-CONFIG_GPIOLIB=y
+-CONFIG_GPIO_SYSFS=y
+-CONFIG_GPIO_DWAPB=y
+-CONFIG_GPIO_TEST=m
+-CONFIG_GPIO_GENERIC_PLATFORM=y
+-CONFIG_SYSCON_REBOOT_MODE=y
+-CONFIG_PMBUS=y
+-CONFIG_SENSORS_STPM098=y
+-CONFIG_SENSORS_PWM_FAN=m
+-CONFIG_THERMAL=y
+-CONFIG_CPU_THERMAL=y
+-CONFIG_DEVFREQ_THERMAL=y
+-CONFIG_THERMAL_EMULATION=y
+-CONFIG_HOBOT_THERMAL=y
+-CONFIG_HOBOT_VM=y
+-CONFIG_HOBOT_TS=y
+-CONFIG_WATCHDOG=y
+-CONFIG_WATCHDOG_NOWAYOUT=y
+-CONFIG_WATCHDOG_SYSFS=y
+-CONFIG_J5_WATCHDOG=y
+-CONFIG_MFD_BD9571MWV=y
+-CONFIG_MFD_AXP20X_I2C=y
+-CONFIG_MFD_SYSCON=y
+-CONFIG_MFD_SYSCON_TEE=y
+-# CONFIG_MFD_VEXPRESS_SYSREG is not set
+-CONFIG_REGULATOR=y
+-CONFIG_REGULATOR_FIXED_VOLTAGE=y
+-CONFIG_REGULATOR_PF7100=y
+-CONFIG_REGULATOR_PF5200=y
+-CONFIG_REGULATOR_MAX20025=y
+-CONFIG_REGULATOR_MAX20411=y
+-CONFIG_REGULATOR_ADAPT=y
+-CONFIG_RC_CORE=m
+-CONFIG_RC_DECODERS=y
+-CONFIG_RC_DEVICES=y
+-CONFIG_MEDIA_SUPPORT=y
+-CONFIG_MEDIA_SUPPORT_FILTER=y
+-CONFIG_MEDIA_PLATFORM_SUPPORT=y
+-CONFIG_VIDEO_HOBOTC_JPU=m
+-CONFIG_VIDEO_HOBOTC_VPU=m
+-CONFIG_HOBOT_VIDEOSYS=y
+-CONFIG_HOBOT_LKOF=m
+-CONFIG_HOBOT_ISP_J5=m
+-CONFIG_HOBOT_CVSYS=y
+-CONFIG_HOBOT_VIDEOSTITCH=y
+-CONFIG_HOBOT_VIO_JPLUS=y
+-CONFIG_HOBOT_VIO_COMMON=m
+-CONFIG_HOBOT_CAMSYS=m
+-CONFIG_HOBOT_PYM_JPLUS=m
+-CONFIG_HOBOT_GDC_JPLUS=m
+-CONFIG_HOBOT_CIM_JPLUS=m
+-CONFIG_HOBOT_SENSOR_API=m
+-CONFIG_HOBOT_MIPI_CSI=y
+-CONFIG_HOBOT_MIPI_HOST=y
+-CONFIG_HOBOT_MIPI_DEV=y
+-CONFIG_HOBOT_MIPI_PHY=y
+-CONFIG_FB=y
+-CONFIG_FB_HOBOT_JPLUS=m
+-CONFIG_SOUND=y
+-CONFIG_SND=y
+-CONFIG_SND_SOC=y
+-CONFIG_HOBOT_JPLUS_AUDIO=m
+-CONFIG_SND_SOC_AC108_DRIVER=m
+-CONFIG_SND_SOC_AC101_DRIVER=m
+-CONFIG_SND_SOC_FAKE_CODEC=m
+-CONFIG_HID_A4TECH=y
+-CONFIG_HID_APPLE=y
+-CONFIG_HID_BELKIN=y
+-CONFIG_HID_CHERRY=y
+-CONFIG_HID_CHICONY=y
+-CONFIG_HID_CYPRESS=y
+-CONFIG_HID_EZKEY=y
+-CONFIG_HID_ITE=y
+-CONFIG_HID_KENSINGTON=y
+-CONFIG_HID_LOGITECH=y
+-CONFIG_HID_REDRAGON=y
+-CONFIG_HID_MICROSOFT=y
+-CONFIG_HID_MONTEREY=y
+-CONFIG_I2C_HID=m
+-# CONFIG_USB_SUPPORT is not set
+-CONFIG_MMC=y
+-CONFIG_MMC_BLOCK_MINORS=32
+-CONFIG_MMC_SDHCI=y
+-CONFIG_MMC_SDHCI_PLTFM=y
+-CONFIG_MMC_SDHCI_OF_ARASAN=y
+-CONFIG_MMC_SDHCI_CADENCE=y
+-CONFIG_MMC_SDHCI_HOBOT_JPLUS=y
+-CONFIG_NEW_LEDS=y
+-CONFIG_LEDS_CLASS=y
+-CONFIG_LEDS_GPIO=y
+-CONFIG_LEDS_PWM=y
+-CONFIG_LEDS_SYSCON=y
+-CONFIG_LEDS_TRIGGER_TIMER=y
+-CONFIG_LEDS_TRIGGER_HEARTBEAT=y
+-CONFIG_LEDS_TRIGGER_DEFAULT_ON=y
+-CONFIG_LEDS_TRIGGER_PANIC=y
+-CONFIG_EDAC=y
+-CONFIG_RTC_CLASS=y
+-CONFIG_DMADEVICES=y
+-CONFIG_DW_AXI_DMAC=y
+-CONFIG_SYNC_FILE=y
+-# CONFIG_VIRTIO_MENU is not set
+-# CONFIG_VHOST_MENU is not set
+-CONFIG_STAGING=y
+-CONFIG_RTL8723BS=m
+-CONFIG_ION=y
+-CONFIG_ION_SYSTEM_HEAP=y
+-CONFIG_ION_CARVEOUT_HEAP=y
+-CONFIG_ION_CHUNK_HEAP=y
+-CONFIG_ION_CMA_HEAP=y
+-CONFIG_ION_HOBOT=y
+-CONFIG_COMMON_CLK_SCMI=y
+-CONFIG_HWSPINLOCK=y
+-# CONFIG_FSL_ERRATUM_A008585 is not set
+-# CONFIG_HISILICON_ERRATUM_161010101 is not set
+-# CONFIG_ARM64_ERRATUM_858921 is not set
+-CONFIG_HOBOT_IOMMU=y
+-CONFIG_REMOTEPROC=y
+-CONFIG_SOC_BRCMSTB=y
+-CONFIG_HOBOT_FUSA_DIAG=y
+-CONFIG_HOBOT_FCHM=y
+-CONFIG_HOBOT_BPU=y
+-CONFIG_BPU=m
+-CONFIG_BPU_CORE=m
+-CONFIG_J5_BPU=y
+-CONFIG_HOBOT_IDU_JPLUS=m
+-CONFIG_HOBOT_DDR_MON=y
+-# CONFIG_HOBOT_J5_STL is not set
+-CONFIG_PM_DEVFREQ=y
+-CONFIG_DEVFREQ_GOV_PERFORMANCE=y
+-CONFIG_DEVFREQ_GOV_POWERSAVE=y
+-CONFIG_DEVFREQ_GOV_USERSPACE=y
+-CONFIG_DEVFREQ_GOV_PASSIVE=y
+-CONFIG_EXTCON=y
+-CONFIG_EXTCON_PTN5150=m
+-CONFIG_EXTCON_USB_GPIO=y
+-CONFIG_MEMORY=y
+-CONFIG_IIO=y
+-CONFIG_MAX9611=m
+-CONFIG_SENSORS_ISL29018=m
+-CONFIG_MPL3115=m
+-CONFIG_PWM=y
+-CONFIG_PWM_HOBOT_JPLUS=m
+-CONFIG_PWM_HOBOT_LITE_JPLUS=m
+-CONFIG_RESET_CONTROLLER=y
+-CONFIG_PHY_XGENE=y
+-CONFIG_PHY_FSL_IMX8MQ_USB=y
+-CONFIG_PHY_MIXEL_MIPI_DPHY=m
+-CONFIG_ANDROID=y
+-CONFIG_TEE=y
+-CONFIG_OPTEE=y
+-CONFIG_OPTEE_SHM_NUM_PRIV_PAGES=128
+-CONFIG_OPTEE_LOG=y
+-CONFIG_HOBOT_APB_TIMER=y
+-CONFIG_APB_TIMER_SYSFS=y
+-CONFIG_J5_APB_TIMER=y
+-CONFIG_EXT4_FS=y
+-CONFIG_EXT4_FS_POSIX_ACL=y
+-CONFIG_FANOTIFY=y
+-CONFIG_FANOTIFY_ACCESS_PERMISSIONS=y
+-CONFIG_QUOTA=y
+-# CONFIG_PRINT_QUOTA_WARNING is not set
+-CONFIG_AUTOFS4_FS=y
+-CONFIG_OVERLAY_FS=y
+-CONFIG_VFAT_FS=y
+-CONFIG_FAT_DEFAULT_UTF8=y
+-CONFIG_EXFAT_FS=y
+-CONFIG_TMPFS=y
+-CONFIG_HUGETLBFS=y
+-CONFIG_CONFIGFS_FS=y
+-CONFIG_UBIFS_FS=y
+-CONFIG_UBIFS_FS_ADVANCED_COMPR=y
+-CONFIG_PSTORE=y
+-CONFIG_PSTORE_CONSOLE=y
+-CONFIG_PSTORE_PMSG=y
+-CONFIG_PSTORE_RAM=y
+-CONFIG_NFS_FS=y
+-CONFIG_NLS_CODEPAGE_437=y
+-CONFIG_NLS_ISO8859_1=y
+-CONFIG_SECURITY=y
+-CONFIG_CRYPTO_USER=y
+-CONFIG_CRYPTO_AUTHENC=m
+-CONFIG_CRYPTO_TEST=m
+-CONFIG_CRYPTO_DH=m
+-CONFIG_CRYPTO_ECDH=m
+-CONFIG_CRYPTO_SM2=y
+-CONFIG_CRYPTO_ECHAINIV=y
+-CONFIG_CRYPTO_CBC=y
+-CONFIG_CRYPTO_XTS=y
+-CONFIG_CRYPTO_CMAC=y
+-CONFIG_CRYPTO_MD5=y
+-CONFIG_CRYPTO_DES=y
+-CONFIG_CRYPTO_SM4=y
+-CONFIG_CRYPTO_ANSI_CPRNG=y
+-CONFIG_CRYPTO_USER_API_HASH=y
+-CONFIG_CRYPTO_USER_API_SKCIPHER=y
+-CONFIG_CRYPTO_USER_API_RNG=y
+-CONFIG_CRYPTO_USER_API_AEAD=y
+-CONFIG_CRYPTO_USER_API_AKCIPHER=y
+-CONFIG_CRYPTO_DEV_HOBOT=y
+-CONFIG_CRYPTO_DEV_HOBOT_DD=y
+-CONFIG_CRYPTO_DEV_HOBOT_DEV=y
+-CONFIG_CRYPTO_DEV_HOBOT_CD=y
+-CONFIG_CRYPTO_DEV_HOBOT_PDU=y
+-CONFIG_PACKING=y
+-CONFIG_INDIRECT_PIO=y
+-CONFIG_CRC_CCITT=m
+-CONFIG_CRC_ITU_T=y
+-CONFIG_CRC7=y
+-CONFIG_XZ_DEC=y
+-CONFIG_DMA_CMA=y
+-CONFIG_DMA_PERNUMA_CMA=y
+-CONFIG_CMA_SIZE_MBYTES=32
+-CONFIG_IRQ_POLL=y
+-CONFIG_PRINTK_TIME=y
+-CONFIG_DYNAMIC_DEBUG=y
+-CONFIG_DEBUG_INFO=y
+-CONFIG_GDB_SCRIPTS=y
+-CONFIG_MAGIC_SYSRQ=y
+-CONFIG_DEBUG_FS=y
+-CONFIG_PANIC_TIMEOUT=1
+-# CONFIG_DEBUG_PREEMPT is not set
+-CONFIG_LATENCYTOP=y
+-CONFIG_BOOTTIME_TRACING=y
+-CONFIG_FUNCTION_TRACER=y
+-CONFIG_IRQSOFF_TRACER=y
+-CONFIG_PREEMPT_TRACER=y
+-CONFIG_SCHED_TRACER=y
+-CONFIG_HWLAT_TRACER=y
+-CONFIG_FTRACE_SYSCALLS=y
+-# CONFIG_STRICT_DEVMEM is not set
+-CONFIG_MEMTEST=y
+-CONFIG_GPIO_IRQ_FROM_MCORE=y
+diff --git a/arch/arm64/configs/j5_matrix5_defconfig b/arch/arm64/configs/j5_matrix5_defconfig
+index 0a370c729976..2cbe70ecf923 100644
+--- a/arch/arm64/configs/j5_matrix5_defconfig
++++ b/arch/arm64/configs/j5_matrix5_defconfig
+@@ -43,6 +43,7 @@ CONFIG_BPF_SYSCALL=y
+ CONFIG_PROFILING=y
+ CONFIG_ARCH_HOBOT=y
+ CONFIG_HOBOT_J5=y
++CONFIG_HOBOT_MATRIX=y
+ CONFIG_ARM64_VA_BITS_48=y
+ CONFIG_SCHED_MC=y
+ CONFIG_SCHED_SMT=y
+@@ -504,8 +505,6 @@ CONFIG_NLS_ISO8859_1=y
+ CONFIG_SECURITY=y
+ CONFIG_CRYPTO_USER=m
+ CONFIG_CRYPTO_TEST=m
+-CONFIG_CRYPTO_DH=m
+-CONFIG_CRYPTO_ECDH=m
+ CONFIG_CRYPTO_SM2=m
+ CONFIG_CRYPTO_ECHAINIV=m
+ CONFIG_CRYPTO_XTS=m
+diff --git a/arch/arm64/kernel/entry-ftrace.S b/arch/arm64/kernel/entry-ftrace.S
+index a338f40e64d3..132775f75974 100644
+--- a/arch/arm64/kernel/entry-ftrace.S
++++ b/arch/arm64/kernel/entry-ftrace.S
+@@ -221,6 +221,9 @@ SYM_CODE_END(ftrace_graph_caller)
+  */
+ SYM_FUNC_START(_mcount)
+ 	mcount_enter
++	ldr_l	x2, ftrace_switch_on
++	cmp 	x2, #0x0
++	b.eq	skip
+ 
+ 	ldr_l	x2, ftrace_trace_function
+ 	adr	x0, ftrace_stub
+@@ -242,6 +245,7 @@ skip_ftrace_call:			// }
+ 	cmp	x0, x2
+ 	b.ne	ftrace_graph_caller	//     ftrace_graph_caller();
+ #endif /* CONFIG_FUNCTION_GRAPH_TRACER */
++skip:
+ 	mcount_exit
+ SYM_FUNC_END(_mcount)
+ EXPORT_SYMBOL(_mcount)
+diff --git a/arch/arm64/kernel/ftrace.c b/arch/arm64/kernel/ftrace.c
+index 86a5cf9bc19a..8e8633106f33 100644
+--- a/arch/arm64/kernel/ftrace.c
++++ b/arch/arm64/kernel/ftrace.c
+@@ -238,6 +238,9 @@ void arch_ftrace_update_code(int command)
+ 
+ int __init ftrace_dyn_arch_init(void)
+ {
++	if (!ftrace_switch_on)
++		return 1;
++
+ 	return 0;
+ }
+ #endif /* CONFIG_DYNAMIC_FTRACE */
+diff --git a/fs/tracefs/inode.c b/fs/tracefs/inode.c
+index 0ee8c6dfb036..e275c44dc13a 100644
+--- a/fs/tracefs/inode.c
++++ b/fs/tracefs/inode.c
+@@ -23,6 +23,7 @@
+ #include <linux/slab.h>
+ 
+ #define TRACEFS_DEFAULT_MODE	0700
++extern int ftrace_switch_on;
+ 
+ static struct vfsmount *tracefs_mount;
+ static int tracefs_mount_count;
+@@ -537,6 +538,9 @@ static int __init tracefs_init(void)
+ {
+ 	int retval;
+ 
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	retval = sysfs_create_mount_point(kernel_kobj, "tracing");
+ 	if (retval)
+ 		return -EINVAL;
+diff --git a/include/linux/ftrace.h b/include/linux/ftrace.h
+index 1bd3a0356ae4..895d89de698c 100644
+--- a/include/linux/ftrace.h
++++ b/include/linux/ftrace.h
+@@ -42,6 +42,7 @@
+ 
+ /* Main tracing buffer and events set up */
+ #ifdef CONFIG_TRACING
++extern int ftrace_switch_on;
+ void trace_init(void);
+ void early_trace_init(void);
+ #else
+diff --git a/include/linux/irqflags.h b/include/linux/irqflags.h
+index a437b2e70d37..9c53e511cb03 100644
+--- a/include/linux/irqflags.h
++++ b/include/linux/irqflags.h
+@@ -189,6 +189,7 @@ do {						\
+  * if !TRACE_IRQFLAGS.
+  */
+ #ifdef CONFIG_TRACE_IRQFLAGS
++extern int ftrace_switch_on;
+ 
+ #define local_irq_enable()				\
+ 	do {						\
+@@ -200,20 +201,20 @@ do {						\
+ 	do {						\
+ 		bool was_disabled = raw_irqs_disabled();\
+ 		raw_local_irq_disable();		\
+-		if (!was_disabled)			\
++		if (ftrace_switch_on && !was_disabled)	\
+ 			trace_hardirqs_off();		\
+ 	} while (0)
+ 
+ #define local_irq_save(flags)				\
+ 	do {						\
+ 		raw_local_irq_save(flags);		\
+-		if (!raw_irqs_disabled_flags(flags))	\
++		if (ftrace_switch_on && !raw_irqs_disabled_flags(flags))	\
+ 			trace_hardirqs_off();		\
+ 	} while (0)
+ 
+ #define local_irq_restore(flags)			\
+ 	do {						\
+-		if (!raw_irqs_disabled_flags(flags))	\
++		if (ftrace_switch_on && !raw_irqs_disabled_flags(flags))	\
+ 			trace_hardirqs_on();		\
+ 		raw_local_irq_restore(flags);		\
+ 	} while (0)
+diff --git a/include/linux/trace_events.h b/include/linux/trace_events.h
+index 89c3f7162267..65d9a22e7a8b 100644
+--- a/include/linux/trace_events.h
++++ b/include/linux/trace_events.h
+@@ -613,6 +613,8 @@ struct trace_event_file {
+ #define __TRACE_EVENT_FLAGS(name, value)				\
+ 	static int __init trace_init_flags_##name(void)			\
+ 	{								\
++		if (!ftrace_switch_on)					\
++			return 0;					\
+ 		event_##name.flags |= value;				\
+ 		return 0;						\
+ 	}								\
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 3b86f63236ef..a9f15c57615d 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -4823,6 +4823,9 @@ static inline void sched_tick_stop(int cpu) { }
+  */
+ static inline void preempt_latency_start(int val)
+ {
++	if (!ftrace_switch_on)
++		return;
++
+ 	if (preempt_count() == val) {
+ 		unsigned long ip = get_lock_parent_ip();
+ #ifdef CONFIG_DEBUG_PREEMPT
+@@ -4860,6 +4863,8 @@ NOKPROBE_SYMBOL(preempt_count_add);
+  */
+ static inline void preempt_latency_stop(int val)
+ {
++	if (!ftrace_switch_on)
++		return;
+ 	if (preempt_count() == val)
+ 		trace_preempt_on(CALLER_ADDR0, get_lock_parent_ip());
+ }
+diff --git a/kernel/trace/blktrace.c b/kernel/trace/blktrace.c
+index c300ac337573..293857364358 100644
+--- a/kernel/trace/blktrace.c
++++ b/kernel/trace/blktrace.c
+@@ -1646,6 +1646,9 @@ static struct trace_event trace_blk_event = {
+ 
+ static int __init init_blk_tracer(void)
+ {
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	if (!register_trace_event(&trace_blk_event)) {
+ 		pr_warn("Warning: could not register block events\n");
+ 		return 1;
+diff --git a/kernel/trace/bpf_trace.c b/kernel/trace/bpf_trace.c
+index ba644760f507..9ddc253421ec 100644
+--- a/kernel/trace/bpf_trace.c
++++ b/kernel/trace/bpf_trace.c
+@@ -2229,6 +2229,9 @@ static struct notifier_block bpf_module_nb = {
+ 
+ static int __init bpf_event_init(void)
+ {
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	register_module_notifier(&bpf_module_nb);
+ 	return 0;
+ }
+diff --git a/kernel/trace/ftrace.c b/kernel/trace/ftrace.c
+index 30010614b923..5439c62c37f6 100644
+--- a/kernel/trace/ftrace.c
++++ b/kernel/trace/ftrace.c
+@@ -4316,6 +4316,9 @@ static struct ftrace_func_command ftrace_mod_cmd = {
+ 
+ static int __init ftrace_mod_cmd_init(void)
+ {
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	return register_ftrace_command(&ftrace_mod_cmd);
+ }
+ core_initcall(ftrace_mod_cmd_init);
+@@ -6936,6 +6939,9 @@ struct ftrace_ops global_ops = {
+ 
+ static int __init ftrace_nodyn_init(void)
+ {
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	ftrace_enabled = 1;
+ 	return 0;
+ }
+diff --git a/kernel/trace/trace.c b/kernel/trace/trace.c
+index 3602857934be..7f3eaad84b97 100644
+--- a/kernel/trace/trace.c
++++ b/kernel/trace/trace.c
+@@ -52,6 +52,9 @@
+ #include "trace.h"
+ #include "trace_output.h"
+ 
++int ftrace_switch_on __read_mostly;
++EXPORT_SYMBOL_GPL(ftrace_switch_on);
++
+ /*
+  * On boot up, the ring buffer is set to the minimum size, so that
+  * we do not waste memory on systems that are not using tracing.
+@@ -210,6 +213,14 @@ static int __init set_ftrace_dump_on_oops(char *str)
+ }
+ __setup("ftrace_dump_on_oops", set_ftrace_dump_on_oops);
+ 
++static int __init set_ftrace_switch_on(char *str)
++{
++	ftrace_switch_on = 1;
++	return 1;
++}
++__setup("ftrace_switch_on", set_ftrace_switch_on);
++
++
+ static int __init stop_trace_on_warning(char *str)
+ {
+ 	if ((strcmp(str, "=0") != 0 && strcmp(str, "=off") != 0))
+@@ -9051,6 +9062,9 @@ int tracing_init_dentry(void)
+ {
+ 	struct trace_array *tr = &global_trace;
+ 
++	if (!ftrace_switch_on)
++		return -ENODEV;
++
+ 	if (security_locked_down(LOCKDOWN_TRACEFS)) {
+ 		pr_warn("Tracing disabled due to lockdown\n");
+ 		return -EPERM;
+@@ -9161,6 +9175,9 @@ static __init int tracer_init_tracefs(void)
+ {
+ 	int ret;
+ 
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	trace_access_lock_init();
+ 
+ 	ret = tracing_init_dentry();
+@@ -9623,6 +9640,9 @@ __init static int tracer_alloc_buffers(void)
+ 
+ void __init early_trace_init(void)
+ {
++	if (!ftrace_switch_on)
++		return;
++
+ 	if (tracepoint_printk) {
+ 		tracepoint_print_iter =
+ 			kmalloc(sizeof(*tracepoint_print_iter), GFP_KERNEL);
+@@ -9637,6 +9657,9 @@ void __init early_trace_init(void)
+ 
+ void __init trace_init(void)
+ {
++	if (!ftrace_switch_on)
++		return;
++
+ 	trace_event_init();
+ }
+ 
+diff --git a/kernel/trace/trace_branch.c b/kernel/trace/trace_branch.c
+index e47fdb4c92fb..b1475b9c219f 100644
+--- a/kernel/trace/trace_branch.c
++++ b/kernel/trace/trace_branch.c
+@@ -185,6 +185,9 @@ __init static int init_branch_tracer(void)
+ {
+ 	int ret;
+ 
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	ret = register_trace_event(&trace_branch_event);
+ 	if (!ret) {
+ 		printk(KERN_WARNING "Warning: could not register "
+@@ -378,6 +381,9 @@ __init static int init_annotated_branch_stats(void)
+ {
+ 	int ret;
+ 
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	ret = register_stat_tracer(&annotated_branch_stats);
+ 	if (!ret) {
+ 		printk(KERN_WARNING "Warning: could not register "
+@@ -443,6 +449,9 @@ __init static int all_annotated_branch_stats(void)
+ {
+ 	int ret;
+ 
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	ret = register_stat_tracer(&all_branch_stats);
+ 	if (!ret) {
+ 		printk(KERN_WARNING "Warning: could not register "
+diff --git a/kernel/trace/trace_dynevent.c b/kernel/trace/trace_dynevent.c
+index 5fa49cfd2bb6..b43c784485fb 100644
+--- a/kernel/trace/trace_dynevent.c
++++ b/kernel/trace/trace_dynevent.c
+@@ -209,6 +209,9 @@ static __init int init_dynamic_event(void)
+ 	struct dentry *entry;
+ 	int ret;
+ 
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	ret = tracing_init_dentry();
+ 	if (ret)
+ 		return 0;
+diff --git a/kernel/trace/trace_events.c b/kernel/trace/trace_events.c
+index 7cfcf301b6e6..8489a78a5b34 100644
+--- a/kernel/trace/trace_events.c
++++ b/kernel/trace/trace_events.c
+@@ -3437,6 +3437,9 @@ static __init int event_trace_enable_again(void)
+ {
+ 	struct trace_array *tr;
+ 
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	tr = top_trace_array();
+ 	if (!tr)
+ 		return -ENODEV;
+diff --git a/kernel/trace/trace_events_synth.c b/kernel/trace/trace_events_synth.c
+index 881df991742a..bde11d40adb5 100644
+--- a/kernel/trace/trace_events_synth.c
++++ b/kernel/trace/trace_events_synth.c
+@@ -2070,6 +2070,9 @@ static __init int trace_events_synth_init_early(void)
+ {
+ 	int err = 0;
+ 
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	err = dyn_event_register(&synth_event_ops);
+ 	if (err)
+ 		pr_warn("Could not register synth_event_ops\n");
+@@ -2082,6 +2085,10 @@ static __init int trace_events_synth_init(void)
+ {
+ 	struct dentry *entry = NULL;
+ 	int err = 0;
++
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	err = tracing_init_dentry();
+ 	if (err)
+ 		goto err;
+diff --git a/kernel/trace/trace_functions_graph.c b/kernel/trace/trace_functions_graph.c
+index b086ba8bb3d6..5b7fa9a976b3 100644
+--- a/kernel/trace/trace_functions_graph.c
++++ b/kernel/trace/trace_functions_graph.c
+@@ -1336,6 +1336,9 @@ static __init int init_graph_tracefs(void)
+ {
+ 	int ret;
+ 
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	ret = tracing_init_dentry();
+ 	if (ret)
+ 		return 0;
+@@ -1349,6 +1352,9 @@ fs_initcall(init_graph_tracefs);
+ 
+ static __init int init_graph_trace(void)
+ {
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	max_bytes_for_cpu = snprintf(NULL, 0, "%u", nr_cpu_ids - 1);
+ 
+ 	if (!register_trace_event(&graph_trace_entry_event)) {
+diff --git a/kernel/trace/trace_hwlat.c b/kernel/trace/trace_hwlat.c
+index 4c01c5d8b9a7..563dc771063e 100644
+--- a/kernel/trace/trace_hwlat.c
++++ b/kernel/trace/trace_hwlat.c
+@@ -631,6 +631,9 @@ __init static int init_hwlat_tracer(void)
+ {
+ 	int ret;
+ 
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	mutex_init(&hwlat_data.lock);
+ 
+ 	ret = register_tracer(&hwlat_tracer);
+diff --git a/kernel/trace/trace_irqsoff.c b/kernel/trace/trace_irqsoff.c
+index f11add83c108..d87285a204b8 100644
+--- a/kernel/trace/trace_irqsoff.c
++++ b/kernel/trace/trace_irqsoff.c
+@@ -735,6 +735,9 @@ static struct tracer preemptirqsoff_tracer __read_mostly =
+ 
+ __init static int init_irqsoff_tracer(void)
+ {
++	if (!ftrace_switch_on)
++		return 0;
++
+ #ifdef CONFIG_IRQSOFF_TRACER
+ 	register_tracer(&irqsoff_tracer);
+ #endif
+diff --git a/kernel/trace/trace_kprobe.c b/kernel/trace/trace_kprobe.c
+index 54b8378071d4..6c43576751a1 100644
+--- a/kernel/trace/trace_kprobe.c
++++ b/kernel/trace/trace_kprobe.c
+@@ -1903,6 +1903,9 @@ static __init int init_kprobe_trace_early(void)
+ {
+ 	int ret;
+ 
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	ret = dyn_event_register(&trace_kprobe_ops);
+ 	if (ret)
+ 		return ret;
+diff --git a/kernel/trace/trace_mmiotrace.c b/kernel/trace/trace_mmiotrace.c
+index 7221ae0b4c47..32c3af8034c2 100644
+--- a/kernel/trace/trace_mmiotrace.c
++++ b/kernel/trace/trace_mmiotrace.c
+@@ -288,6 +288,9 @@ static struct tracer mmio_tracer __read_mostly =
+ 
+ __init static int init_mmio_trace(void)
+ {
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	return register_tracer(&mmio_tracer);
+ }
+ device_initcall(init_mmio_trace);
+diff --git a/kernel/trace/trace_output.c b/kernel/trace/trace_output.c
+index bc24ae8e3613..12a3e8b0f524 100644
+--- a/kernel/trace/trace_output.c
++++ b/kernel/trace/trace_output.c
+@@ -1398,6 +1398,9 @@ __init static int init_events(void)
+ 	struct trace_event *event;
+ 	int i, ret;
+ 
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	for (i = 0; events[i]; i++) {
+ 		event = events[i];
+ 
+diff --git a/kernel/trace/trace_preemptirq.c b/kernel/trace/trace_preemptirq.c
+index f4938040c228..855bd35fa0f2 100644
+--- a/kernel/trace/trace_preemptirq.c
++++ b/kernel/trace/trace_preemptirq.c
+@@ -27,6 +27,9 @@ static DEFINE_PER_CPU(int, tracing_irq_cpu);
+  */
+ void trace_hardirqs_on_prepare(void)
+ {
++	if (!ftrace_switch_on)
++		return;
++
+ 	if (this_cpu_read(tracing_irq_cpu)) {
+ 		if (!in_nmi())
+ 			trace_irq_enable(CALLER_ADDR0, CALLER_ADDR1);
+@@ -39,6 +42,9 @@ NOKPROBE_SYMBOL(trace_hardirqs_on_prepare);
+ 
+ void trace_hardirqs_on(void)
+ {
++	if (!ftrace_switch_on)
++		return;
++
+ 	if (this_cpu_read(tracing_irq_cpu)) {
+ 		if (!in_nmi())
+ 			trace_irq_enable_rcuidle(CALLER_ADDR0, CALLER_ADDR1);
+@@ -60,6 +66,9 @@ NOKPROBE_SYMBOL(trace_hardirqs_on);
+  */
+ void trace_hardirqs_off_finish(void)
+ {
++	if (!ftrace_switch_on)
++		return;
++
+ 	if (!this_cpu_read(tracing_irq_cpu)) {
+ 		this_cpu_write(tracing_irq_cpu, 1);
+ 		tracer_hardirqs_off(CALLER_ADDR0, CALLER_ADDR1);
+@@ -73,6 +82,9 @@ NOKPROBE_SYMBOL(trace_hardirqs_off_finish);
+ 
+ void trace_hardirqs_off(void)
+ {
++	if (ftrace_switch_on)
++		return;
++
+ 	lockdep_hardirqs_off(CALLER_ADDR0);
+ 
+ 	if (!this_cpu_read(tracing_irq_cpu)) {
+@@ -87,6 +99,9 @@ NOKPROBE_SYMBOL(trace_hardirqs_off);
+ 
+ __visible void trace_hardirqs_on_caller(unsigned long caller_addr)
+ {
++	if (!ftrace_switch_on)
++		return;
++
+ 	if (this_cpu_read(tracing_irq_cpu)) {
+ 		if (!in_nmi())
+ 			trace_irq_enable_rcuidle(CALLER_ADDR0, caller_addr);
+@@ -102,6 +117,9 @@ NOKPROBE_SYMBOL(trace_hardirqs_on_caller);
+ 
+ __visible void trace_hardirqs_off_caller(unsigned long caller_addr)
+ {
++	if (!ftrace_switch_on)
++		return;
++
+ 	lockdep_hardirqs_off(CALLER_ADDR0);
+ 
+ 	if (!this_cpu_read(tracing_irq_cpu)) {
+@@ -119,6 +137,9 @@ NOKPROBE_SYMBOL(trace_hardirqs_off_caller);
+ 
+ void trace_preempt_on(unsigned long a0, unsigned long a1)
+ {
++	if (!ftrace_switch_on)
++		return;
++
+ 	if (!in_nmi())
+ 		trace_preempt_enable_rcuidle(a0, a1);
+ 	tracer_preempt_on(a0, a1);
+@@ -126,6 +147,9 @@ void trace_preempt_on(unsigned long a0, unsigned long a1)
+ 
+ void trace_preempt_off(unsigned long a0, unsigned long a1)
+ {
++	if (!ftrace_switch_on)
++		return;
++
+ 	if (!in_nmi())
+ 		trace_preempt_disable_rcuidle(a0, a1);
+ 	tracer_preempt_off(a0, a1);
+diff --git a/kernel/trace/trace_printk.c b/kernel/trace/trace_printk.c
+index ff32476df072..4ec532b56c41 100644
+--- a/kernel/trace/trace_printk.c
++++ b/kernel/trace/trace_printk.c
+@@ -369,6 +369,9 @@ static __init int init_trace_printk_function_export(void)
+ {
+ 	int ret;
+ 
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	ret = tracing_init_dentry();
+ 	if (ret)
+ 		return 0;
+@@ -383,6 +386,9 @@ fs_initcall(init_trace_printk_function_export);
+ 
+ static __init int init_trace_printk(void)
+ {
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	return register_module_notifier(&module_trace_bprintk_format_nb);
+ }
+ 
+diff --git a/kernel/trace/trace_sched_wakeup.c b/kernel/trace/trace_sched_wakeup.c
+index f1c603358ff3..b624917e1f0d 100644
+--- a/kernel/trace/trace_sched_wakeup.c
++++ b/kernel/trace/trace_sched_wakeup.c
+@@ -800,6 +800,9 @@ __init static int init_wakeup_tracer(void)
+ {
+ 	int ret;
+ 
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	ret = register_tracer(&wakeup_tracer);
+ 	if (ret)
+ 		return ret;
+diff --git a/kernel/trace/trace_stack.c b/kernel/trace/trace_stack.c
+index c408423e5d65..bcdd80bbbf61 100644
+--- a/kernel/trace/trace_stack.c
++++ b/kernel/trace/trace_stack.c
+@@ -556,6 +556,9 @@ static __init int stack_trace_init(void)
+ {
+ 	int ret;
+ 
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	ret = tracing_init_dentry();
+ 	if (ret)
+ 		return 0;
+diff --git a/kernel/trace/trace_uprobe.c b/kernel/trace/trace_uprobe.c
+index a1ed96a7a462..ebfb287ea5cc 100644
+--- a/kernel/trace/trace_uprobe.c
++++ b/kernel/trace/trace_uprobe.c
+@@ -1640,6 +1640,9 @@ static __init int init_uprobe_trace(void)
+ {
+ 	int ret;
+ 
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	ret = dyn_event_register(&trace_uprobe_ops);
+ 	if (ret)
+ 		return ret;
+diff --git a/kernel/tracepoint.c b/kernel/tracepoint.c
+index d7260f6614a6..b2f94a9ea64f 100644
+--- a/kernel/tracepoint.c
++++ b/kernel/tracepoint.c
+@@ -15,6 +15,8 @@
+ #include <linux/sched/task.h>
+ #include <linux/static_key.h>
+ 
++extern int ftrace_switch_on;
++
+ enum tp_func_state {
+ 	TP_FUNC_0,
+ 	TP_FUNC_1,
+@@ -697,6 +699,9 @@ static __init int init_tracepoints(void)
+ {
+ 	int ret;
+ 
++	if (!ftrace_switch_on)
++		return 0;
++
+ 	ret = register_module_notifier(&tracepoint_module_nb);
+ 	if (ret)
+ 		pr_warn("Failed to register tracepoint module enter notifier\n");
+-- 
+2.17.1
+

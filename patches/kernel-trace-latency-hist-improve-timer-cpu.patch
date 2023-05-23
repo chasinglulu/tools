@@ -1,0 +1,65 @@
+From: Carsten Emde <C.Emde@osadl.org>
+Date: Sun, 27 Nov 2016 20:16:15 +0100
+Subject: [PATCH] latency-hist: indicate correct cpu of timer offset, if known
+
+The CPU of the missed timer offset histogram indicated the CPU
+that was executing the timer interrupt rather than the CPU of
+the task to switch to, since the latter may not be known. In
+cases where it can be predicted correctly, since only a single
+CPU is allowed, we now indicate this one.
+
+Signed-off-by: Carsten Emde <C.Emde@osadl.org>
+
+---
+ kernel/trace/latency_hist.c |   14 ++++++++++----
+ 1 file changed, 10 insertions(+), 4 deletions(-)
+
+Index: linux-4.14.15-rt12/kernel/trace/latency_hist.c
+===================================================================
+--- linux-4.14.15-rt12.orig/kernel/trace/latency_hist.c
++++ linux-4.14.15-rt12/kernel/trace/latency_hist.c
+@@ -1168,6 +1168,7 @@ static notrace void probe_hrtimer_interr
+ 	    (task->prio < curr->prio ||
+ 	    (task->prio == curr->prio &&
+ 	    !cpumask_test_cpu(cpu, task->cpus_ptr)))) {
++		int nextcpu = -1;
+ 		long latency;
+ 		u64 now;
+ 
+@@ -1177,27 +1178,32 @@ static notrace void probe_hrtimer_interr
+ 				return;
+ 		}
+ 
++		if (cpumask_weight(task->cpus_ptr) == 1)
++			nextcpu = cpumask_first(task->cpus_ptr);
++
+ #ifdef CONFIG_SWITCHTIME_HIST
+-		if (!switchtime_pid) {
++		if (!switchtime_pid && nextcpu != -1) {
+ 			unsigned long flags;
+ 			struct task_struct *cpu_switchtime_task;
+ 
+ 			raw_spin_lock_irqsave(&switchtime_lock, flags);
+-			cpu_switchtime_task = per_cpu(switchtime_task, cpu);
++			cpu_switchtime_task = per_cpu(switchtime_task, nextcpu);
+ 			if (cpu_switchtime_task &&
+ 			    task->prio < cpu_switchtime_task->prio) {
+ 				cpu_switchtime_task->switchtime_timestamp_hist =
+ 				    0;
+ 				put_task_struct(cpu_switchtime_task);
+-				per_cpu(switchtime_task, cpu) = NULL;
++				per_cpu(switchtime_task, nextcpu) = NULL;
+ 			}
+ 			raw_spin_unlock_irqrestore(&switchtime_lock, flags);
+ 		}
+ #endif
+ 
+ 		now = ftrace_now(cpu);
++		if (nextcpu == -1)
++			nextcpu = cpu;
+ 		latency = (long) div_s64(-latency_ns, NSECS_PER_USECS);
+-		latency_hist(MISSED_TIMER_OFFSETS, cpu, latency, 0, 0, now,
++		latency_hist(MISSED_TIMER_OFFSETS, nextcpu, latency, 0, 0, now,
+ 		    task, -1);
+ #ifdef CONFIG_WAKEUP_LATENCY_HIST
+ 		task->timer_offset = latency;
