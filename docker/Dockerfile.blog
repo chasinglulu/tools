@@ -1,0 +1,35 @@
+
+# SPDX-License-Identifier: GPL-2.0+
+# This Dockerfile is used to build an image containing basic stuff to be used
+# to build Xen and run our test suites.
+
+FROM ubuntu:20.04
+LABEL Description=" This image is for building hexo+next Blog inside a container"
+# Make sure apt is happy
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install vim sudo bash-completion -y && \
+    apt-get install npm curl git-core -y
+
+RUN apt-get update && \
+    curl -sL https://deb.nodesource.com/setup_18.x | sudo bash - && \
+    apt-get install nodejs -y
+
+
+RUN useradd -m -d /home/charleye -s /bin/bash -u 1000 -U charleye
+RUN apt-get install sudo && \
+    usermod -aG sudo charleye && \
+    echo "charleye:123456" | chpasswd
+
+RUN npm install -g hexo
+RUN git config --global user.email "wangkartx@gmail.com" && \
+    git config --global user.name "chasinglulu"
+
+# USER charleye
+# RUN cd /home/charleye && \
+    # git clone -b dev https://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@github.com/chasinglulu/Blogs.git && \
+    # cd Blogs && git submodule update --init && \
+    # npm install --registry=https://registry.npm.taobao.org
+
+# USER root
