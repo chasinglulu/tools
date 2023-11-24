@@ -1,4 +1,4 @@
-<mxfile host="app.diagrams.net" modified="2023-11-24T14:09:34.378Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36" etag="tpx9tJZGMCOsID2SWfNH" version="22.1.3" type="github" pages="3">
+<mxfile host="app.diagrams.net" modified="2023-11-24T14:11:53.816Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36" etag="RWU5n-mNotOD8hZIv4nI" version="22.1.3" type="github" pages="3">
   <diagram name="第 1 页" id="-PQ7a87coccsCbGEvKLt">
     <mxGraphModel dx="933" dy="478" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" background="none" math="0" shadow="0">
       <root>
@@ -21,19 +21,19 @@
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="goVptPX91S9yTsB_GWEB-6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" edge="1" parent="1" source="goVptPX91S9yTsB_GWEB-2" target="goVptPX91S9yTsB_GWEB-3">
+        <mxCell id="goVptPX91S9yTsB_GWEB-6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;fontFamily=Times New Roman;fontSize=14;labelBackgroundColor=none;strokeColor=#457B9D;fontColor=default;" parent="1" source="goVptPX91S9yTsB_GWEB-2" target="goVptPX91S9yTsB_GWEB-3" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="goVptPX91S9yTsB_GWEB-2" value="U-Boot" style="whiteSpace=wrap;html=1;rounded=1;fillColor=#A8DADC;strokeColor=#457B9D;fontColor=#1D3557;" vertex="1" parent="1">
+        <mxCell id="goVptPX91S9yTsB_GWEB-2" value="U-Boot" style="whiteSpace=wrap;html=1;rounded=1;fillColor=#A8DADC;strokeColor=#457B9D;fontColor=#1D3557;fontFamily=Times New Roman;fontSize=14;labelBackgroundColor=none;" parent="1" vertex="1">
           <mxGeometry x="240" y="160" width="120" height="60" as="geometry" />
         </mxCell>
-        <mxCell id="goVptPX91S9yTsB_GWEB-3" value="Kernel" style="whiteSpace=wrap;html=1;rounded=1;fillColor=#A8DADC;strokeColor=#457B9D;fontColor=#1D3557;" vertex="1" parent="1">
+        <mxCell id="goVptPX91S9yTsB_GWEB-3" value="Kernel" style="whiteSpace=wrap;html=1;rounded=1;fillColor=#A8DADC;strokeColor=#457B9D;fontColor=#1D3557;fontFamily=Times New Roman;fontSize=14;labelBackgroundColor=none;" parent="1" vertex="1">
           <mxGeometry x="440" y="160" width="120" height="60" as="geometry" />
         </mxCell>
-        <mxCell id="goVptPX91S9yTsB_GWEB-5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="goVptPX91S9yTsB_GWEB-4" target="goVptPX91S9yTsB_GWEB-2">
+        <mxCell id="goVptPX91S9yTsB_GWEB-5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;fontFamily=Times New Roman;fontSize=14;labelBackgroundColor=none;strokeColor=#457B9D;fontColor=default;" parent="1" source="goVptPX91S9yTsB_GWEB-4" target="goVptPX91S9yTsB_GWEB-2" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="goVptPX91S9yTsB_GWEB-4" value="ATF" style="whiteSpace=wrap;html=1;rounded=1;fillColor=#A8DADC;strokeColor=#457B9D;fontColor=#1D3557;" vertex="1" parent="1">
+        <mxCell id="goVptPX91S9yTsB_GWEB-4" value="ATF" style="whiteSpace=wrap;html=1;rounded=1;fillColor=#A8DADC;strokeColor=#457B9D;fontColor=#1D3557;fontFamily=Times New Roman;fontSize=14;labelBackgroundColor=none;" parent="1" vertex="1">
           <mxGeometry x="40" y="160" width="120" height="60" as="geometry" />
         </mxCell>
       </root>
