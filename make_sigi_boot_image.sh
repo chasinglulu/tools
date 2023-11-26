@@ -32,8 +32,10 @@ set -x
 	sudo parted -s -a none $IMG_NAME mkpart boot_b 154MiB 304MiB
 	sudo parted $IMG_NAME set 5 boot on
 	sudo parted $IMG_NAME set 6 boot on
-	# userdata partition 923MiB
-	sudo parted -s -a none $IMG_NAME mkpart userdata 304MiB 2046MiB
+	# buidlroot partition 512MiB
+	sudo parted -s -a none $IMG_NAME mkpart buildroot 304MiB 816MiB
+	# userdata partition 512MiB
+	sudo parted -s -a none $IMG_NAME mkpart userdata 816MiB 2040MiB
 	sync
 
 	part_map=$(sudo kpartx -av $IMG_NAME)
