@@ -1,13 +1,13 @@
 #!/bin/bash
 
 CUR_DIR=$(cd $(dirname $0);pwd)
-#URL="http://cdimage.ubuntu.com/ubuntu-base/releases/20.04.4/release/"
+URL="http://cdimage.ubuntu.com/ubuntu-base/releases/20.04.4/release/"
 #URL="http://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/"
-#UBUNTU_BASE="ubuntu-base-20.04.3-base-arm64.tar.gz"
+UBUNTU_BASE="ubuntu-base-20.04.3-base-arm64.tar.gz"
 #UBUNTU_BASE="ubuntu-base-22.04-base-arm64.tar.gz"
-UBUNTU_BASE="ubuntu-base-18.04.5-base-arm64.tar.gz"
-IMAGE_NAME="ubuntu-18.04.5-rootfs-cpio-aarch64.img"
-#IMAGE_NAME="ubuntu-20.04.3-rootfs-cpio-aarch64.img"
+#UBUNTU_BASE="ubuntu-base-18.04.5-base-arm64.tar.gz"
+#IMAGE_NAME="ubuntu-18.04.5-rootfs-cpio-aarch64.img"
+IMAGE_NAME="ubuntu-20.04.3-rootfs-cpio-aarch64.img"
 #IMAGE_NAME="ubuntu-22.04-rootfs-cpio-aarch64.img"
 
 # 在PC Ubuntu上安装依赖工具
@@ -16,8 +16,8 @@ sudo apt-get install qemu-user-static binfmt-support
 # 下载 ubuntu base rootfs package
 if [ ! -f "$CUR_DIR/$UBUNTU_BASE" ]
 then
-    wget http://cdimage.ubuntu.com/ubuntu-base/releases/18.04.2/release/$UBUNTU_BASE
-#    wget $URL$UBUNTU_BASE
+#    wget http://cdimage.ubuntu.com/ubuntu-base/releases/18.04.2/release/$UBUNTU_BASE
+    wget $URL$UBUNTU_BASE
 fi
 
 # 创建一个2GiB rootfs image并格式化为ext4
@@ -32,7 +32,7 @@ sudo mount -t ext4 $CUR_DIR/$IMAGE_NAME $CUR_DIR/rootfs/
 
 # 将ubuntu base rootfs package解压到本地目录中
 sudo tar -xzf $CUR_DIR/$UBUNTU_BASE -C $CUR_DIR/rootfs/
-sudo cp $CUR_DIR/*.deb $CUR_DIR/rootfs/var/
+#sudo cp $CUR_DIR/*.deb $CUR_DIR/rootfs/var/
 
 # # copy依赖的工具和host网络配置
 sudo cp /usr/bin/qemu-aarch64-static $CUR_DIR/rootfs/usr/bin/
@@ -80,11 +80,11 @@ sudo chroot $CUR_DIR/rootfs /bin/bash -c "echo $STR >>/etc/systemd/system/serial
 sudo chroot $CUR_DIR/rootfs sed -i '3a\auth sufficient pam_listfile.so item=tty sense=allow file=/etc/securetty onerr=fail apply=root' /etc/pam.d/login
 sudo chroot $CUR_DIR/rootfs /bin/bash -c "echo ttyS1 > /etc/securetty"
 sudo chroot $CUR_DIR/rootfs ln -s /lib/systemd/systemd init
-sudo chroot $CUR_DIR/rootfs dpkg -i /var/linux-libc-dev_4.15.0-187.198_arm64.deb
-sudo chroot $CUR_DIR/rootfs dpkg -i /var/libc6_2.28-0ubuntu1_arm64.deb
-sudo chroot $CUR_DIR/rootfs dpkg -i /var/libc-dev-bin_2.28-0ubuntu1_arm64.deb
-sudo chroot $CUR_DIR/rootfs dpkg -i /var/libc6-dev_2.28-0ubuntu1_arm64.deb
-sudo chroot $CUR_DIR/rootfs dpkg -i /var/libc-bin_2.28-0ubuntu1_arm64.deb
+#sudo chroot $CUR_DIR/rootfs dpkg -i /var/linux-libc-dev_4.15.0-187.198_arm64.deb
+#sudo chroot $CUR_DIR/rootfs dpkg -i /var/libc6_2.28-0ubuntu1_arm64.deb
+#sudo chroot $CUR_DIR/rootfs dpkg -i /var/libc-dev-bin_2.28-0ubuntu1_arm64.deb
+#sudo chroot $CUR_DIR/rootfs dpkg -i /var/libc6-dev_2.28-0ubuntu1_arm64.deb
+#sudo chroot $CUR_DIR/rootfs dpkg -i /var/libc-bin_2.28-0ubuntu1_arm64.deb
 
 #remove APT cache
 set -x
