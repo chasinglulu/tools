@@ -3,12 +3,13 @@
 set -x
 
 IS_IN_SUDO=""
+HOME_DIR="/home"
 
 function create_user()
 {
 	echo "$1" # arguments are accessible through $1, $2,...
 	USER_NAME=$1
-	sudo useradd -m -d /home/${USER_NAME} -s /bin/bash ${USER_NAME}
+	sudo useradd -m -d $HOME_DIR/${USER_NAME} -s /bin/bash ${USER_NAME}
 	if [ -n "${IS_IN_SUDO}" ]
 	then
 		sudo usermod -a -G sudo ${USER_NAME}
@@ -37,7 +38,7 @@ sudo cat >>/etc/samba/smb.conf<<EOF
 [$username]
    comment = $username
    browseable = yes
-   path = /home/$username/
+   path = $HOME_DIR/$username/
    public = no
    valid users = $username
    create mask = 644
@@ -55,18 +56,21 @@ function remove_samba_config ()
 {
 	echo "$1" # arguments are accessible through $1, $2,...
 	username=$1
-	sudo chmod 666 /etc/samba/smb.conf
 	line=$(grep "\[$username\]" /etc/samba/smb.conf -n | cut -d : -f 1)
-	end=$(($line + 11))
-	sudo sed -i "$line,${end}d" /etc/samba/smb.conf
-	sudo chmod 644 /etc/samba/smb.conf
-	sudo systemctl restart smbd.service
+	if [ -n "$line" ]
+	then
+		sudo chmod 666 /etc/samba/smb.conf
+		end=$(($line + 11))
+		sudo sed -i "$line,${end}d" /etc/samba/smb.conf
+		sudo chmod 644 /etc/samba/smb.conf
+		sudo systemctl restart smbd.service
+	fi
 }
 
 function nfs_setup () {
 	echo "$1" # arguments are accessible through $1, $2,...
 	username=$1
-	echo "/home/$username/ *(rw,sync,no_subtree_check)" | sudo tee -a /etc/exports
+	echo "$HOME_DIR/$username/ *(rw,sync,no_subtree_check)" | sudo tee -a /etc/exports
 	sudo systemctl restart nfs-server.service
 	sudo showmount -e localhost | grep $username
 }
@@ -74,15 +78,24 @@ function nfs_setup () {
 function remove_nfs_config () {
 	echo "$1" # arguments are accessible through $1, $2,...
 	username=$1
-	line=$(grep "\/home\/$username\/" /etc/exports -n | cut -d : -f 1)
-	sudo sed -i "${line}d" /etc/exports
-	sudo systemctl restart nfs-server.service
+	pattern=$(echo "$HOME_DIR" | sed 's:/:\\/:g')
+	line=$(grep "$pattern\/$username" /etc/exports -n | cut -d : -f 1)
+	if [ -n "$line" ]
+	then
+		sudo sed -i "${line}d" /etc/exports
+		sudo systemctl restart nfs-server.service
+	fi
 }
 
 function usage()
 {
+	set +x
 	echo "Usage:"
-	echo "$0 [-rd] USER_NAME"
+	echo "$0 [-srh] [-p prefix] USER_NAME"
+	echo -e "\t -s         add user into sudo group"
+	echo -e "\t -r         remove user and config"
+	echo -e "\t -p prefix  prefix home directory"
+	echo -e "\t -h         help"
 }
 
 if [ $# -lt 1 ]
@@ -91,14 +104,17 @@ then
 	exit 0
 fi
 
-while getopts :rhd opt
+while getopts :srhp: opt
 do
 	case $opt in
-		r)
+		s)
 			IS_IN_SUDO="Yes"
 			;;
-		d)
+		r)
 			DELETE_USER="Yes"
+			;;
+		p)
+			PREFIX="$OPTARG"
 			;;
 		h)
 			usage
@@ -112,6 +128,15 @@ do
 	esac
 done
 shift $((OPTIND - 1))
+
+if [ -n "$PREFIX" ]
+then
+	PREFIX=$(cd $PREFIX && pwd)
+	if [ -d "$PREFIX" ]
+	then
+		HOME_DIR="${PREFIX}${HOME_DIR}"
+	fi
+fi
 
 if [ -n "$1" ]
 then
