@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-2.0+
+# This Dockerfile is used to build an image containing basic stuff to be used
+# to cross build
+
+FROM ubuntu:20.04
+LABEL Description=" This image is for cross building inside a container"
+# Make sure apt is happy
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install vim sudo bash kpartx parted -y && \
+    apt-get install bash-completion build-essential -y
+
+RUN useradd -m -d /home/charleye -s /bin/bash -u 1000 -U charleye
+RUN usermod -aG sudo charleye
+RUN echo "charleye:charleye" | chpasswd
+
+RUN apt-get install autoconf automake autotools-dev -y && \
+    apt-get install curl python3 python3-pip libmpc-dev -y && \
+    apt-get install libmpfr-dev libgmp-dev gawk build-essential -y && \
+    apt-get install bison flex texinfo gperf libtool patchutils bc -y && \
+    apt-get install zlib1g-dev libexpat-dev ninja-build git cmake libglib2.0-dev -y
+
+RUN ln -s /usr/bin/python3.8 /usr/bin/python
