@@ -1,0 +1,13 @@
+[Unit]
+Description = Helix QAC License
+After = network.target syslog.target
+Wants = network.target
+
+[Service]
+Type = simple
+Restart = always
+ExecStart = /opt/Perforce/RLM-11.1/bin/rlm
+ExecStop = /usr/bin/killall rlm
+
+[Install]
+WantedBy = multi-user.target

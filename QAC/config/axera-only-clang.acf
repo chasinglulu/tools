@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<acf xmlversion="2.0.0">
+  <components>
+    <component name="qac" target="C" version="11.4.0"/>
+    <component name="namecheck" target="C" version="4.4.0"/>
+    <component name="rcma" target="C_CPP" version="4.4.0"/>
+    <component name="mta" target="C_CPP" version="4.4.0"/>
+    <component name="qacpp" target="C++" version="6.4.0"/>
+    <component name="dataflow" target="C_CPP" version="1.4.0"/>
+    <component name="m3cm" target="C" version="5.4.0"/>
+  </components>
+  <component_settings/>
+</acf>

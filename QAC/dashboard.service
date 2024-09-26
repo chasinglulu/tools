@@ -1,0 +1,15 @@
+[Unit]
+Description = Helix QAC Dashboard
+After = network.target syslog.target
+Wants = network.target
+
+[Service]
+User = wangxinlu
+Group = wangxinlu
+Type = simple
+Restart = always
+ExecStart = /opt/Perforce/Helix-QAC-Dashboard-2023.3/bin/qavserver
+ExecStop = /usr/bin/killall qavserver
+
+[Install]
+WantedBy = multi-user.target
