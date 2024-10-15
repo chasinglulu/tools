@@ -1,0 +1,13 @@
+[Unit]
+Description=File browser
+After = network.target syslog.target
+Wants = network.target
+
+[Service]
+Type = simple
+Restart = always
+ExecStart=/usr/local/bin/filebrowser -d /usr/share/filebrowser/filebrowser.db
+ExecStop = /usr/bin/killall filebrowser
+
+[Install]
+WantedBy=multi-user.target
