@@ -3,7 +3,7 @@
 set +x
 
 # main start
-export GERRIT_ID=$(echo ${GERRIT_ID} | sed 's/ //g' | sed 's/，/,/g')
+export GERRIT_ID=$(echo ${GERRIT_ID} | sed 's/ //g' | sed 's/，/,/g' | sort -n)
 echo ${GERRIT_ID}
 
 # add patch set ids:
@@ -54,8 +54,8 @@ function lfs_change_cherry_pick() {
 for gerrit_id in $(echo ${GERRIT_ID} | sed 's/,/ /g')
 do
     echo -e "\nCherry-pick gerrit change id: ${gerrit_id}"
-    gerrit_id_project=$(ssh -p 29418 gerrit.aixin-chip.com gerrit query ${gerrit_id} < /dev/null | grep '^  project:' | sed 's/.*project:\s*\(\S*\).*/\1/g' | sed 's/^acos\///')
-    gerrit_id_refId=$(ssh -p 29418 gerrit.aixin-chip.com gerrit query --current-patch-set ${gerrit_id} < /dev/null | grep ' ref:' | awk '{print $2}')
+    gerrit_id_project=$(gerrit -m get_change -i ${gerrit_id} | jq -r .project)
+    gerrit_id_refId=$(gerrit -m get_change_detail -i ${gerrit_id} | jq -r .revisions[].ref)
 
     if [ -z "${gerrit_id_project}" ];
     then
@@ -128,6 +128,11 @@ fi
 if [ "${QEMU_VIRT}" = "true" ]
 then
 BUILD_TARGET="${BUILD_TARGET} qemu_virt"
+fi
+
+if [ "${AXERA_ZEBU}" = "true" ]
+then
+BUILD_TARGET="${BUILD_TARGET} zebu"
 fi
 
 export BUILD_TARGET

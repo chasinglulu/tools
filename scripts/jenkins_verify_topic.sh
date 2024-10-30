@@ -13,7 +13,7 @@ fi
 if [ "$PATCH_MODE" = "Topic" ]
 then
 	# Get all the gerrit IDs from the same topic
-	GERRIT_ID=$(ssh -p 29418 gerrit.aixin-chip.com gerrit query --patch-sets topic:${TOPIC_NAME} < /dev/null | grep '^  number:' | awk '{print $2}' | sort | xargs )
+	GERRIT_ID=$(ssh -p 29418 gerrit.aixin-chip.com gerrit query --patch-sets topic:${TOPIC_NAME} < /dev/null | grep '^  number:' | awk '{print $2}' | sort -n | xargs )
 	echo "GERRIT_ID: $GERRIT_ID"
 elif [ "$PATCH_MODE" = "GerritID" ]
 then
@@ -79,8 +79,8 @@ function lfs_change_cherry_pick() {
 for gerrit_id in $(echo ${GERRIT_ID} | sed 's/,/ /g')
 do
     echo -e "\nCherry-pick gerrit change id: ${gerrit_id}"
-    gerrit_id_project=$(ssh -p 29418 gerrit.aixin-chip.com gerrit query ${gerrit_id} < /dev/null | grep '^  project:' | sed 's/.*project:\s*\(\S*\).*/\1/g' | sed 's/^acos\///')
-    gerrit_id_refId=$(ssh -p 29418 gerrit.aixin-chip.com gerrit query --current-patch-set ${gerrit_id} < /dev/null | grep ' ref:' | awk '{print $2}')
+    gerrit_id_project=$(gerrit -m get_change -i ${gerrit_id} | jq -r .project)
+    gerrit_id_refId=$(gerrit -m get_change_detail -i ${gerrit_id} | jq -r .revisions[].ref)
 
     if [ -z "${gerrit_id_project}" ];
     then
@@ -198,6 +198,11 @@ then
 BUILD_TARGET="${BUILD_TARGET} qemu_virt"
 fi
 
+if [ "${AXERA_ZEBU}" = "true" ]
+then
+BUILD_TARGET="${BUILD_TARGET} zebu"
+fi
+
 echo "============================ $BUILD_TARGET ======================="
 
 export BUILD_TARGET
@@ -212,6 +217,11 @@ fi
 
 echo "======================== Begin verifying ========================"
 sh ${WORKSPACE}/build/scripts/jenkins_verify.sh
+if [ $? -ne 0 ]
+then
+echo "Compilation failed"
+exit 1
+fi
 
 if [ "$PATCH_MODE" = "GerritID" ]
 then
