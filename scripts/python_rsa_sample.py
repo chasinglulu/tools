@@ -5,6 +5,8 @@
 # exportKey should work, but it's best to uninstall and install Pycryptodome.
 #
 # sudo pip install Pycryptodome
+# API doc
+# https://pycryptodome.readthedocs.io/en/latest/src/api.html
 
 import sys
 from Crypto.PublicKey import RSA
