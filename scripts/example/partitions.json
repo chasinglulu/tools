@@ -1,0 +1,33 @@
+[
+	{
+	  "partitions": [
+		{
+		  "name": "emmc",
+		  "size": "0"
+		},
+		{
+		  "name": "atf_a",
+		  "size": "512",
+		  "attrs": "ro"
+		},
+		{
+		  "name": "atf_b",
+		  "size": "512",
+		  "attrs": "ro"
+		},
+		{
+		  "name": "uboot_a",
+		  "size": "2048",
+		  "attrs": "ro"
+		},
+		{
+		  "name": "uboot_b",
+		  "size": "2048",
+		  "attrs": "ro"
+		}
+	  ]
+	},
+	{
+		"unit": "1K"
+	}
+]

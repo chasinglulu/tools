@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--  [tag] FDLLevel:                                                        -->
+<!--        [attribute]   1, one level FDL for download                      -->
+<!--                      2, two levels FDL for download                     -->
+<!--  [tag] Partitions:                                                      -->
+<!--        [attribute]   strategy: 0, not partition                         -->
+<!--                                1, partition                             -->
+<!--  [tag] Img:                                                             -->
+<!--        [attribute]   name: GUI display                                  -->
+<!--        [attribute] select: 0, GUI selected                              -->
+<!--                            1, GUI not selected                          -->
+<!--        [attribute]   flag: mask value combined by below options (|)     -->
+<!--                            0x01, need input a file                      -->
+<!--                            0x02, must be selected                       -->
+<!--              [tag]     ID: Internel used, not changed                   -->
+<!--              [tag]   Type: Internel used, not changed                   -->
+<!--              [tag]   Auth:                                              -->
+<!--                      [attribute] algo: 0, No Auth                       -->
+<!--                                        1, MD5                           -->
+<!--                                        2, crc16                         -->
+<!--              [tag]   File: Download file name                           -->
+<!--              [tag]   Description: GUI display                           -->
+<Config>
+  <Project alias="M57H" name="M57H" version="1.0">
+    <FDLLevel>2</FDLLevel>
+    <Partitions strategy="1" unit="2">
+      <Partition gap="0" id="emmc" size="0" />
+      <Partition gap="0" id="atf_a" size="512" />
+      <Partition gap="0" id="atf_b" size="512" />
+      <Partition gap="0" id="uboot_a" size="2048" />
+      <Partition gap="0" id="uboot_b" size="2048" />
+    </Partitions>
+    <ImgList>
+      <Img flag="2" name="INIT" select="1">
+        <ID>INIT</ID>
+        <Type>INIT</Type>
+        <Block>
+          <Base>0x0</Base>
+          <Size>0x0</Size>
+        </Block>
+        <File />
+        <Auth algo="0" />
+        <Description>Handshake with ROMCode</Description>
+      </Img>
+      <Img flag="3" name="FDL1" select="1">
+        <ID>FDL1</ID>
+        <Type>FDL1</Type>
+        <Block>
+          <Base>0x400</Base>
+          <Size>0x0</Size>
+        </Block>
+        <File />
+        <Auth algo="0" />
+        <Description>FDL1 image to download</Description>
+      </Img>
+      <Img flag="3" name="FDL2" select="1">
+        <ID>FDL2</ID>
+        <Type>FDL2</Type>
+        <Block>
+          <Base>0x50000000</Base>
+          <Size>0x0</Size>
+        </Block>
+        <File />
+        <Auth algo="0" />
+        <Description>FDL2 image to download</Description>
+      </Img>
+      <Img flag="1" name="ATF_A" select="1">
+        <ID>ATF_A</ID>
+        <Type>CODE</Type>
+        <Block id="atf_a">
+          <Base>0x0</Base>
+          <Size>0x0</Size>
+        </Block>
+        <File />
+        <Auth algo="0" />
+        <Description>This image is used for atf_a partition.</Description>
+      </Img>
+      <Img flag="1" name="ATF_B" select="1">
+        <ID>ATF_B</ID>
+        <Type>CODE</Type>
+        <Block id="atf_b">
+          <Base>0x0</Base>
+          <Size>0x0</Size>
+        </Block>
+        <File />
+        <Auth algo="0" />
+        <Description>This image is used for atf_b partition.</Description>
+      </Img>
+      <Img flag="1" name="UBOOT_A" select="1">
+        <ID>UBOOT_A</ID>
+        <Type>CODE</Type>
+        <Block id="uboot_a">
+          <Base>0x0</Base>
+          <Size>0x0</Size>
+        </Block>
+        <File />
+        <Auth algo="0" />
+        <Description>This image is used for uboot_a partition.</Description>
+      </Img>
+      <Img flag="1" name="UBOOT_B" select="1">
+        <ID>UBOOT_B</ID>
+        <Type>CODE</Type>
+        <Block id="uboot_b">
+          <Base>0x0</Base>
+          <Size>0x0</Size>
+        </Block>
+        <File />
+        <Auth algo="0" />
+        <Description>This image is used for uboot_b partition.</Description>
+      </Img>
+    </ImgList>
+  </Project>
+</Config>
