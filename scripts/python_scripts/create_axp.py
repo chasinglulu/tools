@@ -140,7 +140,7 @@ def update_xml_content(tree, args, zip_dir, copied_files):
     root = tree.getroot()
 
     node_project = root.find('Project')
-    node_project.set('name', args.project)
+    node_project.set('name', args.name)
     if args.version:
         node_project.set('version', args.version)
 
@@ -312,7 +312,7 @@ def parse_args():
         description='Create AXP from XML configuration.',
         formatter_class=argparse.RawTextHelpFormatter
     )
-    parser.add_argument('-p', '--project', default='M57H', help='Set project name')
+    parser.add_argument('-n', '--name', default='M57H', help='Set project name')
     parser.add_argument('-o', '--output', default='output.axp', help='Set output .axp file')
     parser.add_argument('-x', '--xml', default='output.xml', help='XML configuration file')
     parser.add_argument('-v', '--version', default='1.0', help='Set version')

@@ -115,7 +115,7 @@ def parse_arguments():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument('-n', '--name', default='M57H', help='Project name')
-    parser.add_argument('-a', '--alias', default='M57H', help='Project alias')
+    parser.add_argument('-a', '--alias', default=None, help='Project alias')
     parser.add_argument('-i', '--input', default='partitions.json', help='Input JSON file')
     parser.add_argument('-o', '--output', default='output.xml', help='Output XML file')
     parser.add_argument('-l', '--fdl_level', default='2', choices=['1', '2'], help='FDL level')
@@ -129,6 +129,7 @@ def parse_arguments():
     parser.add_argument('-m', '--mtdparts', action='store_true', default=False, help='Enable mtdparts string conversion')
     parser.add_argument('-t', '--strategy', default='1', choices=['0', '1'], help='Partitions strategy')
     parser.add_argument('-s', '--secureboot', action='store_true', default=False, help='Include EIP image in ImgList')
+    parser.add_argument('-v', '--version', default='1.0', help='Project version')
     args = parser.parse_args()
 
     # Validate input file
@@ -180,7 +181,8 @@ def load_and_validate_json(input_file):
 
 def create_xml_elements(args, unit_value):
     config_elem = ET.Element('Config')
-    project_elem = ET.SubElement(config_elem, 'Project', alias=args.alias, name=args.name, version="1.0")
+    alias = args.name if args.alias is None else args.alias
+    project_elem = ET.SubElement(config_elem, 'Project', alias=alias, name=args.name, version=args.version)
     fdl_elem = ET.SubElement(project_elem, 'FDLLevel')
     fdl_elem.text = args.fdl_level
     partitions_elem = ET.SubElement(project_elem, 'Partitions', strategy=args.strategy, unit=unit_value)
