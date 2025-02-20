@@ -6,7 +6,7 @@
 #
 # This script is used to create an AXP file from an XML configuration file.
 # It reads the XML file, copies the specified files, updates the XML content,
-# and creates a AXP file as the output.
+# and creates an AXP file as the output.
 #
 # Usage:
 #   python3 create_axp.py -p <project_name> -o <output_axp> -x <xml_file> [files...]
@@ -19,7 +19,13 @@
 #   -v, --version       Set version (default: 1.0)
 #   -d, --debug         Enable debug mode
 #   -V, --verbose       Enable verbose output
-#   files               Input image files
+#   -P, --partitions    Input image files in the format PARTITION_NAME=file_path
+#                       e.g.,
+#                         ATF_A=path/to/file1
+#                         ATF_B=path/to/file2
+#                         UBOOT_A=path/to/file3
+#                         UBOOT_B=path/to/file4
+#   -f, --files         Input image files
 #
 # For any questions, please contact: wangkart@aliyun.com
 
@@ -104,7 +110,33 @@ def get_unique_filename(file_name, copied_files):
     copied_files.add(dst_file)
     return dst_file
 
+def update_file_node(file, node_img, zip_dir, copied_files):
+    file_name = get_fname(file)
+    dst_file = get_unique_filename(file_name, copied_files)
+    node_file = node_img.find('File')
+    node_file.text = dst_file
+    node_auth = node_img.find('Auth')
+    algo = node_auth.get('algo')
+    if algo and int(algo) > 0:
+        file_path = os.path.join(zip_dir, dst_file)
+        if int(algo) == 1:
+            node_auth.text = calc_md5(file_path)
+        elif int(algo) == 2:
+            node_auth.text = calc_crc16(file_path)
+
 def update_xml_content(tree, args, zip_dir, copied_files):
+    """
+    Update XML content based on provided arguments.
+
+    Args:
+        tree (ET.ElementTree): XML tree to update.
+        args (argparse.Namespace): Arguments with project details, version, files, and partitions.
+        zip_dir (str): Directory where the zip files are stored.
+        copied_files (set): Set to track copied files.
+
+    Raises:
+        ValueError: If input files count doesn't match required image nodes.
+    """
     root = tree.getroot()
 
     node_project = root.find('Project')
@@ -112,38 +144,41 @@ def update_xml_content(tree, args, zip_dir, copied_files):
     if args.version:
         node_project.set('version', args.version)
 
-    file_no = 0
-    for node_img in root.iter('Img'):
-        flag = node_img.get('flag')
-        if flag and (int(flag) & 0x01) == 0x01:
-            if file_no >= len(args.files):
-                raise IndexError("The number of input image files is less than expected.")
-            file_name = get_fname(args.files[file_no])
-            dst_file = get_unique_filename(file_name, copied_files)
-            node_file = node_img.find('File')
-            node_file.text = dst_file
-            node_auth = node_img.find('Auth')
-            algo = node_auth.get('algo')
-            if algo and int(algo) > 0:
-                file_path = os.path.join(zip_dir, dst_file)
-                if int(algo) == 1:
-                    node_auth.text = calc_md5(file_path)
-                elif int(algo) == 2:
-                    node_auth.text = calc_crc16(file_path)
-            file_no += 1
+    img_nodes = [img for img in root.iter('Img') if (int(img.get('flag', 0)) & 0x01) == 0x01]
+
+    if args.files:
+        for file, node_img in zip(args.files, img_nodes):
+            update_file_node(file, node_img, zip_dir, copied_files)
+
+    if args.partitions:
+        partition_map = {p.split('=')[0]: p.split('=')[1] for p in args.partitions}
+        for node_img in img_nodes:
+            part_name = node_img.find('ID').text
+            file = partition_map.get(part_name)
+            if file:
+                update_file_node(file, node_img, zip_dir, copied_files)
 
 def make_zip(zip_dir, zip_path, verbose):
+    """
+    Create a zip file from a directory.
+
+    Args:
+        zip_dir (str): Directory to zip.
+        zip_path (str): Output zip file path.
+        verbose (bool): Print file names if True.
+
+    Raises:
+        Exception: On error, prints message and exits.
+    """
     try:
-        cwd = os.getcwd()
-        os.chdir(zip_dir)
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
             for root, _, files in os.walk(zip_dir):
                 for file in files:
                     file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, zip_dir)
                     if verbose:
                         print(f'Adding {file_path} to AXP {zip_path}')
-                    zf.write(file_path, os.path.relpath(file_path, zip_dir))
-        os.chdir(cwd)
+                    zf.write(file_path, arcname)
     except Exception as e:
         print(f"Error creating AXP file {zip_path}: {e}")
         sys.exit(1)
@@ -156,7 +191,90 @@ def copy_file(src, dst, verbose):
     elif os.path.isdir(src):
         shutil.copytree(src, dst)
 
-def create_axp_from_xml(args):
+def prepare_directories(xml_path, output_path):
+    zip_dir = os.path.splitext(output_path)[0]
+    if os.path.exists(output_path):
+        os.remove(output_path)
+    if os.path.exists(zip_dir):
+        shutil.rmtree(zip_dir)
+    os.mkdir(zip_dir)
+    return zip_dir
+
+def copy_files(args, root, zip_dir, copied_files):
+    """
+    Copies specified files to the destination directory.
+
+    Args:
+        args (argparse.Namespace): Command-line arguments.
+        root (xml.etree.ElementTree.Element): XML root element.
+        zip_dir (str): Destination directory.
+        copied_files (set): Set of copied files.
+
+    Returns:
+        int: Total files copied.
+    """
+    total_files_copied = 0
+    if args.partitions:
+        partition_map = {p.split('=')[0]: p.split('=')[1] for p in args.partitions}
+        for part_name, file_path in partition_map.items():
+            dst_file = get_unique_filename(get_fname(file_path), copied_files)
+            dst_path = os.path.join(zip_dir, dst_file)
+            copy_file(file_path, dst_path, args.verbose)
+            total_files_copied += 1
+
+    files = [get_abspath(file) for file in args.files] if args.files else []
+    if not files:
+        files = [
+            get_abspath(node_img.find('File').text)
+            for node_img in root.iter('Img')
+            if node_img.get('flag') and (int(node_img.get('flag')) & 0x01) == 0x01
+            and node_img.find('File').text
+        ]
+
+    for file in files:
+        dst_file = get_unique_filename(get_fname(file), copied_files)
+        dst_path = os.path.join(zip_dir, dst_file)
+        copy_file(file, dst_path, args.verbose)
+        total_files_copied += 1
+
+    return total_files_copied
+
+def copy_xml_file(xml_path, zip_dir, verbose):
+    xml_dst_path = os.path.join(zip_dir, get_fname(xml_path))
+    if verbose:
+        print(f'Copying from {xml_path} to {xml_dst_path}')
+    shutil.copy(xml_path, xml_dst_path)
+    return xml_dst_path
+
+def create_axp(args):
+    """
+    Creates an AXP file from the given XML file.
+
+    Args:
+        args: argparse.Namespace with attributes:
+            - xml (str): Input XML file path.
+            - output (str): Output AXP file path.
+            - verbose (bool): Enable detailed logs.
+            - debug (bool): Retain temporary directories for debugging.
+
+    Raises:
+        Exception: On error during AXP creation.
+
+    Steps:
+        1. Parse XML file.
+        2. Prepare directories.
+        3. Copy referenced files.
+        4. Copy XML file.
+        5. Update XML content.
+        6. Write updated XML.
+        7. Create ZIP archive.
+        8. Clean up unless in debug mode.
+
+    Prints:
+        - Detailed logs if verbose.
+        - Success message on completion.
+        - Error message and exits on exception.
+    """
     try:
         xml_path = get_abspath(args.xml)
         output_path = get_abspath(args.output)
@@ -164,34 +282,19 @@ def create_axp_from_xml(args):
         tree = ET.parse(xml_path)
         root = tree.getroot()
 
-        files = [get_abspath(file) for file in args.files]
-        if not files:
-            for node_img in root.iter('Img'):
-                flag = node_img.get('flag')
-                if flag and (int(flag) & 0x01) == 0x01:
-                    file_name = node_img.find('File').text
-                    if file_name:
-                        files.append(get_abspath(file_name))
-
-        zip_dir = os.path.splitext(output_path)[0]
-        if os.path.exists(output_path):
-            os.remove(output_path)
-        if os.path.exists(zip_dir):
-            shutil.rmtree(zip_dir)
-        os.mkdir(zip_dir)
+        zip_dir = prepare_directories(xml_path, output_path)
 
         if args.verbose:
             print('Starting file copy...')
+
         copied_files = set()
-        for file in files:
-            dst_file = get_unique_filename(get_fname(file), copied_files)
-            copy_file(file, os.path.join(zip_dir, dst_file), args.verbose)
-        xml_dst_path = os.path.join(zip_dir, get_fname(xml_path))
+        total_files_copied = copy_files(args, root, zip_dir, copied_files)
+
+        xml_dst_path = copy_xml_file(xml_path, zip_dir, args.verbose)
+        total_files_copied += 1
+
         if args.verbose:
-            print(f'Copying from {xml_path} to {xml_dst_path}')
-        shutil.copy(xml_path, xml_dst_path)
-        if args.verbose:
-            print(f'Total {len(files) + 1} files copied.')
+            print(f'Total {total_files_copied} files copied.')
 
         copied_files.clear()
         update_xml_content(tree, args, zip_dir, copied_files)
@@ -205,42 +308,90 @@ def create_axp_from_xml(args):
         sys.exit(1)
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Create AXP from XML configuration.')
+    parser = argparse.ArgumentParser(
+        description='Create AXP from XML configuration.',
+        formatter_class=argparse.RawTextHelpFormatter
+    )
     parser.add_argument('-p', '--project', default='M57H', help='Set project name')
     parser.add_argument('-o', '--output', default='output.axp', help='Set output .axp file')
     parser.add_argument('-x', '--xml', default='output.xml', help='XML configuration file')
     parser.add_argument('-v', '--version', default='1.0', help='Set version')
     parser.add_argument('-d', '--debug', action='store_true', default=False, help='Enable debug mode')
     parser.add_argument('-V', '--verbose', action='store_true', default=False, help='Enable verbose output')
-    parser.add_argument('files', nargs='*', help='Input image files')
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('-P', '--partitions', nargs='*',
+                       help=('Input image files in the format PARTITION_NAME=file_path\n'
+                             'e.g.,\n'
+                             '  ATF_A=path/to/file1\n'
+                             '  ATF_B=path/to/file2\n'
+                             '  UBOOT_A=path/to/file3\n'
+                             '  UBOOT_B=path/to/file4'))
+    group.add_argument('-f', '--files', nargs='*', help='Input image files')
     args = parser.parse_args()
 
     # Validate file paths
     if not os.path.exists(args.xml):
-        parser.error(f"The XML configuration file '{args.xml}' does not exist.")
+        parser.error(f"The XML file '{args.xml}' does not exist.")
     if not os.path.isfile(args.xml):
-        parser.error(f"The XML configuration file '{args.xml}' is not a valid file.")
+        parser.error(f"The XML file '{args.xml}' is not a valid file.")
 
     # Check for unique <name> attribute and <ID> of <Img> node
     try:
         tree = ET.parse(args.xml)
         root = tree.getroot()
-        names = []
-        ids = []
-        for node_img in root.iter('Img'):
-            name = node_img.get('name')
+        names = set()
+        ids = set()
+        for img in root.iter('Img'):
+            name = img.get('name')
             if name in names:
                 parser.error(f"Duplicate <name> attribute found in <Img> node: {name}")
-            names.append(name)
-            node_id = node_img.find('ID').text
-            if node_id in ids:
-                parser.error(f"Duplicate <ID> found in <Img> node: {node_id}")
-            ids.append(node_id)
+            names.add(name)
+            img_id = img.find('ID').text
+            if img_id in ids:
+                parser.error(f"Duplicate <ID> found in <Img> node: {img_id}")
+            ids.add(img_id)
     except ET.ParseError as e:
         parser.error(f"Error parsing XML file: {e}")
 
+    # Validate partition arguments
+    if args.partitions:
+        part_names = set()
+        for part in args.partitions:
+            if '=' not in part:
+                parser.error(f"Invalid partition format: {part}. Expected format PARTITION_NAME=file_path")
+            part_name, file_path = part.split('=', 1)
+            if part_name in part_names:
+                parser.error(f"Duplicate PARTITION_NAME found: {part_name}")
+            part_names.add(part_name)
+            if not os.path.exists(file_path):
+                parser.error(f"The image file '{file_path}' does not exist.")
+            if not os.path.isfile(file_path):
+                parser.error(f"The image file '{file_path}' is not a valid file.")
+
+        # Check if partition names match IDs in XML
+        invalid_parts = [part_name for part_name in part_names if part_name not in ids]
+        if invalid_parts:
+            parser.error(f"PARTITION_NAME: '{', '.join(invalid_parts)}' do not match any ID in the XML file.")
+
+    # Validate files arguments
+    if args.files:
+        for file in args.files:
+            if not os.path.exists(file):
+                parser.error(f"The input file '{file}' does not exist.")
+            if not os.path.isfile(file):
+                parser.error(f"The input file '{file}' is not a valid file.")
+
+    # Validate input files count matches required image nodes
+    img_nodes = [img for img in root.iter('Img') if (int(img.get('flag', 0)) & 0x01) == 0x01]
+    input_files = args.files if args.files else args.partitions
+    if len(input_files) != len(img_nodes):
+        parser.error(f"Mismatch: {len(input_files)} input image files vs {len(img_nodes)} required image nodes.")
+
     return args
 
-if __name__ == "__main__":
+def main():
     args = parse_args()
-    create_axp_from_xml(args)
+    create_axp(args)
+
+if __name__ == "__main__":
+    main()
