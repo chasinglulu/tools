@@ -77,7 +77,12 @@ def convert_to_mtdparts(json_partitions, json_unit):
     exclude_names = {"emmc", "nand", "nor", "hyper"}
     for partition in json_partitions:
         if partition['name'].lower() not in exclude_names:
-            size_in_kb = int(partition['size']) * unit_size // 1024
+            size_str = partition['size']
+            if isinstance(size_str, str) and size_str.startswith('0x'):
+                size = int(size_str, 16)
+            else:
+                size = int(size_str)
+            size_in_kb = size * unit_size // 1024
             if size_in_kb < 1:
                 raise ValueError(f"Partition size too small: {partition['name']} size is less than 1KB.")
             attrs = partition.get('attrs', '')
@@ -190,7 +195,12 @@ def create_xml_elements(args, unit_value):
 
 def add_partitions(partitions_elem, json_partitions):
     for partition in json_partitions:
-        ET.SubElement(partitions_elem, 'Partition', gap="0", id=partition['name'], size=partition['size'])
+        size_str = partition['size']
+        if isinstance(size_str, str) and size_str.startswith('0x'):
+            size = str(int(size_str, 16))
+        else:
+            size = size_str
+        ET.SubElement(partitions_elem, 'Partition', gap="0", id=partition['name'], size=size)
 
 def generate_images(args, json_partitions):
     images = [
