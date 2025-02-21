@@ -231,13 +231,17 @@ initialize_image_paths() {
     fi
 
     # Check if files exist
-    # paths=(
-    #  "$EIP_PATH" "$FDL1_PATH" "$FDL2_PATH" "$SPL_PATH" "$UBOOT_PATH"
-    #  "$KERNEL_PATH" "$ATF_PATH" "$OPTEE_PATH"
-    # )
-    # for path in "${paths[@]}"; do
-    #  [ -n "$path" ] && [ ! -f "$path" ] && echo "File not found: $path"
-    # done
+    paths=(
+     "$EIP_PATH" "$FDL1_PATH" "$FDL2_PATH" "$SPL_PATH" "$UBOOT_PATH"
+     "$KERNEL_PATH" "$ATF_PATH" "$OPTEE_PATH"
+    )
+    for path in "${paths[@]}"; do
+      if [ -n "$path" ] && [ ! -f "$path" ]; then
+        echo "Error: File not found: $path"
+        exit 1
+      fi
+    done
+    debug "Image paths initialized."
 }
 
 initialize_project_specific_paths() {
