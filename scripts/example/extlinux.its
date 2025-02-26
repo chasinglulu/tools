@@ -1,0 +1,32 @@
+/dts-v1/;
+/ {
+    description = "Linux boot configuration files";
+    #address-cells = <2>;
+    images {
+        firmware-1 {
+            data = /incbin/("extlinux.conf");
+            description = "extlinux.conf";
+            type = "firmware";
+            arch = "arm64";
+            os = "linux";
+            compression = "none";
+            load = <0x1 0x0FF00000>;
+            hash-1 {
+                algo = "sha256";
+            };
+        };
+    };
+    configurations {
+        default = "conf-1";
+        conf-1 {
+            description = "extlinux.conf";
+            firmware = "firmware-1";
+            loadables = "firmware-1";
+            signature {
+                sign-images = "firmware";
+                algo = "sha256,rsa2048";
+                key-name-hint = "akcipher2048";
+            };
+        };
+    };
+};
