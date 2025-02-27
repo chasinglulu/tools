@@ -389,6 +389,92 @@ def check_and_compress(file_path, comp_type, debug=False):
     except subprocess.CalledProcessError as e:
         print(f"Error compressing {file_path}: {e}")
         return None
+
+def create_multi_spl_its(paths, default_addresses, sha_algo="sha256", rsa_algo="rsa2048", comp="none", debug=False):
+    """
+    Generates the content of a multi_spl.its file.
+
+    Args:
+        paths (dict): Dictionary containing paths to bl31, uboot, and tee images.
+        default_addresses (dict): Dictionary containing default addresses.
+        sha_algo (str, optional): SHA algorithm. Defaults to "sha256".
+        rsa_algo (str, optional): RSA algorithm. Defaults to "rsa2048".
+        comp (str, optional): Compression type. Defaults to "none".
+        debug (bool, optional): Enable debug output. Defaults to False.
+
+    Returns:
+        str: The content of the multi_spl.its file.
+    """
+
+    def create_image_node_kwargs(name, data_path, default_addr, sha_algo, comp):
+        return {
+            'node_name': name,
+            'data_path': data_path,
+            'description': default_addr['description'],
+            'os_name': default_addr['os_name'],
+            'load_addr': hex_to_addr_tuple(default_addr['load_addr']),
+            'entry_point': hex_to_addr_tuple(default_addr['entry_point']),
+            'sha_algo': sha_algo,
+            'image_type': "firmware",
+            'arch': "arm64",
+            'compression': comp if comp != "none" else "none"
+        }
+
+    # Compress images if compression is specified
+    compressed_paths = {}
+    for img_type, path in paths.items():
+        if path and comp != "none":
+            compressed_path = check_and_compress(path, comp, debug)
+            if compressed_path is None:
+                print(f"Error: Failed to compress {img_type} image.")
+                sys.exit(1)
+            compressed_paths[img_type] = compressed_path
+        else:
+            compressed_paths[img_type] = path if path else None
+
+    atf_kwargs = create_image_node_kwargs("atf", compressed_paths['bl31'], default_addresses['bl31'], sha_algo, comp)
+    atf_node = create_image_node(atf_kwargs)
+
+    uboot_kwargs = create_image_node_kwargs("u-boot", compressed_paths['uboot'], default_addresses['uboot'], sha_algo, comp)
+    uboot_node = create_image_node(uboot_kwargs)
+
+    tee_node = ""
+    if paths.get('tee'):
+        tee_kwargs = create_image_node_kwargs("optee", compressed_paths['tee'], default_addresses['tee'], sha_algo, comp)
+        tee_node = create_image_node(tee_kwargs)
+
+    firmware_list = ["u-boot", "atf"]
+    if paths.get('tee'):
+        firmware_list.append("optee")
+    firmware_str = ", ".join(f'"{fw}"' for fw in firmware_list)
+
+    config_node = f"""
+        default = "conf-1";
+        conf-1 {{
+            description = "SPL Loaded Multiple Firmwares";
+            firmware = {firmware_str};
+            loadables = {firmware_str};
+            signature {{
+                sign-images = "firmware";
+                algo = "{sha_algo},{rsa_algo}";
+                key-name-hint = "akcipher{rsa_algo[3:]}";
+            }};
+        }};
+"""
+
+    images_str = f"""{uboot_node}{atf_node}{tee_node}"""
+
+    content = f"""
+/dts-v1/;
+/ {{
+    description = "multiple firmware blobs loaded by SPL";
+    #address-cells = <2>;
+    images {{{images_str}    }};
+    configurations {{{config_node}    }};
+}};
+"""
+    return content
+
 def main():
     parser = argparse.ArgumentParser(description='Generate ITS files for different firmware components.')
     parser.add_argument('--bl31', type=str, help='Path to ARM Trusted Firmware image')
@@ -407,8 +493,15 @@ def main():
     parser.add_argument('--dtb_load_addr', type=str, help='Load address for the dtb in hex format (e.g., 0x18000000)', default=None)
     parser.add_argument('--rootfs_load_addr', type=str, help='Load address for the rootfs in hex format (e.g., 0x19000000)', default=None)
     parser.add_argument('-d', '--debug', action='store_true', help='Enable debug output', default=False)
+    parser.add_argument('--multi_spl', action='store_true', help='Generate multi_spl.its', default=False)
 
     args = parser.parse_args()
+
+    # Check for multiple occurrences of arguments
+    arg_names = ['bl31', 'uboot', 'tee', 'kernel', 'dtb', 'rootfs', 'extlinux']
+    for arg_name in arg_names:
+        if getattr(args, arg_name) and sys.argv.count('--' + arg_name) > 1:
+            parser.error(f"Argument --{arg_name} can only be specified once.")
 
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -424,32 +517,38 @@ def main():
     }
 
     img_types = ['bl31', 'uboot', 'tee', 'extlinux']
-    for img_type in img_types:
-        path = getattr(args, img_type)
-        if path:
-            if args.comp != 'none':
-                path = check_and_compress(path, args.comp, args.debug)
+    if not args.multi_spl:
+        for img_type in img_types:
+            path = getattr(args, img_type)
+            if path:
+                default_addr = default_addresses[img_type]
+                if args.comp == 'none':
+                    for c_type in ["gzip", "lz4", "bzip2"]:
+                        if is_compressed(path, c_type, args.debug):
+                            print(f"Error: {path} is compressed with {c_type}, but compression is set to none.")
+                            sys.exit(1)
+                if args.comp != 'none':
+                    path = check_and_compress(path, args.comp, args.debug)
 
-            default_addr = default_addresses[img_type]
-            load_addr = args.load_addr if args.load_addr else default_addr['load_addr']
-            entry_point = args.entry_point if args.entry_point else default_addr['entry_point']
-            load_addr = hex_to_addr_tuple(load_addr)
-            entry_point = hex_to_addr_tuple(entry_point)
+                load_addr = args.load_addr if args.load_addr else default_addr['load_addr']
+                entry_point = args.entry_point if args.entry_point else default_addr['entry_point']
+                load_addr = hex_to_addr_tuple(load_addr)
+                entry_point = hex_to_addr_tuple(entry_point)
 
-            its_kwargs = {
-                'description': default_addr['description'],
-                'data_path': path,
-                'image_type': "firmware",
-                'arch': "arm64",
-                'os_name': default_addr['os_name'],
-                'load_addr': load_addr,
-                'entry_point': entry_point,
-                'sha_algo': args.sha_algo,
-                'rsa_algo': args.rsa_algo,
-                'compression': args.comp
-            }
-            content = create_its(its_kwargs)
-            write_its(os.path.join(args.output_dir, f'{img_type}.its'), content)
+                its_kwargs = {
+                    'description': default_addr['description'],
+                    'data_path': path,
+                    'image_type': "firmware",
+                    'arch': "arm64",
+                    'os_name': default_addr['os_name'],
+                    'load_addr': load_addr,
+                    'entry_point': entry_point,
+                    'sha_algo': args.sha_algo,
+                    'rsa_algo': args.rsa_algo,
+                    'compression': args.comp
+                }
+                content = create_its(its_kwargs)
+                write_its(os.path.join(args.output_dir, f'{img_type}.its'), content)
 
     if args.kernel:
         if not args.dtb:
@@ -462,6 +561,15 @@ def main():
         kernel_path = args.kernel
         dtb_path = args.dtb
         rootfs_path = args.rootfs
+
+        if args.comp == 'none':
+            paths_to_check = {'kernel': kernel_path, 'dtb': dtb_path, 'rootfs': rootfs_path}
+            for name, path in paths_to_check.items():
+                if path:
+                    for c_type in ["gzip", "lz4", "bzip2"]:
+                        if is_compressed(path, c_type, args.debug):
+                            print(f"Error: {path} is compressed with {c_type}, but compression is set to none.")
+                            sys.exit(1)
 
         if args.comp != 'none':
             kernel_path = check_and_compress(kernel_path, args.comp, args.debug)
@@ -482,6 +590,20 @@ def main():
         }
         kernel_content = create_kernel_its(kernel_kwargs)
         write_its(os.path.join(args.output_dir, 'kernel.its'), kernel_content)
+
+    if args.multi_spl:
+        if not (args.bl31 and args.uboot):
+            parser.error("--multi_spl requires --bl31 and --uboot")
+        paths = {'bl31': args.bl31, 'uboot': args.uboot, 'tee': args.tee if args.tee else None}
+        if args.comp == 'none':
+            for img_type, path in paths.items():
+                if path:
+                    for c_type in ["gzip", "lz4", "bzip2"]:
+                        if is_compressed(path, c_type, args.debug):
+                            print(f"Error: {path} is compressed with {c_type}, but compression is set to none.")
+                            sys.exit(1)
+        content = create_multi_spl_its(paths, default_addresses, args.sha_algo, args.rsa_algo, args.comp, args.debug)
+        write_its(os.path.join(args.output_dir, 'multi_spl.its'), content)
 
 if __name__ == "__main__":
     main()
