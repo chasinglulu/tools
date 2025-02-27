@@ -51,9 +51,9 @@ def main():
     parser.add_argument("-k", "--kernel", required=False, default="kernel.img", help="Kernel image name.")
     parser.add_argument("-i", "--initrd", help="Initrd image name (optional).")
     parser.add_argument("-o", "--output", default="extlinux.conf", help="Path to the output file (default: extlinux.conf).")
-    parser.add_argument("-l", "--label", default="boot_base", help="Label for the entry (default: m57h-base).")
+    parser.add_argument("-l", "--label", default="boot_base", help="Label for the entry (default: boot_base).")
     parser.add_argument("-f", "--fdt", help="FDT image name (optional).")
-    parser.add_argument("-m", "--menu-title", dest="menu_title", default="Boot Options", help="Menu title (default: M57H Boot Options).")
+    parser.add_argument("-m", "--menu-title", dest="menu_title", default="Boot Options", help="Menu title (default: Boot Options).")
 
     args = parser.parse_args()
 
@@ -71,7 +71,7 @@ def main():
 
     config = generate_extlinux_conf(config_data)
     write_extlinux_conf(config, args.output)
-    print(f"extlinux.conf file generated at {args.output}")
+    print(f"{args.output} generated successfully.")
 
 if __name__ == "__main__":
     main()
