@@ -1,0 +1,59 @@
+/dts-v1/;
+/ {
+	description = "multiple firmware blobs and U-Boot, loaded by SPL";
+	#address-cells = <2>;
+	images {
+		u-boot {
+			data = /incbin/("u-boot-dtb.bin");
+			description = "U-Boot";
+			type = "firmware";
+			arch = "arm64";
+			os = "u-boot";
+			compression = "none";
+			load = <0x1 0x00200000>;
+			entry = <0x1 0x00200000>;
+			hash-1 {
+				algo = "sha256";
+			};
+		};
+		atf {
+			data = /incbin/("bl31.bin");
+			description = "ARM Trusted Firmware";
+			type = "firmware";
+			arch = "arm64";
+			os = "arm-trusted-firmware";
+			compression = "none";
+			load = <0x1 0x00104000>;
+			entry = <0x1 0x00104000>;
+			hash-1 {
+				algo = "sha256";
+			};
+		};
+		optee {
+			data = /incbin/("tee-pager_v2.bin");
+			description = "Trusted Execution Environment Image";
+			type = "firmware";
+			arch = "arm64";
+			os = "tee";
+			compression = "none";
+			load = <0x1 0x04000000>;
+			entry = <0x1 0x04000000>;
+			hash-1 {
+				algo = "sha256";
+			};
+		};
+	};
+	configurations {
+		default = "conf-1";
+		conf-1 {
+			description = "SPL Multiple Firmwares";
+			firmware = "u-boot", "atf", "optee";
+			loadables = "u-boot", "atf", "optee";
+			signature {
+				sign-images = "firmware";
+				algo = "sha256,rsa2048";
+				key-name-hint = "akcipher2048";
+			};
+		};
+	};
+};
