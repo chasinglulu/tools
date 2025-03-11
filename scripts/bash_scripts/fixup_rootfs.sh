@@ -88,7 +88,7 @@ mk_rootfs() {
 
     mkdir -p "$TARGET_DIR/opt/ko"
     find "$WORKSPACE/build/out/$PLATFORM/objs/kernel/linux/linux-6.1.83/" -name "*.ko" | xargs -I {} cp {} "$TARGET_DIR/opt/ko/"
-    cp_file "$WORKSPACE/build/out/$PLATFORM/objs/kernel/osdrv/out/ko/*.ko" "$TARGET_DIR/opt/ko/"
+    find "$WORKSPACE/build/out/$PLATFORM/objs/kernel/osdrv/out/ko/" -name "*.ko" | xargs -I {} cp {} "$TARGET_DIR/opt/ko/"
 }
 
 # Function to generate fakeroot script
