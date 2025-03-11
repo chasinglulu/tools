@@ -61,6 +61,14 @@ def create_image_node(kwargs):
     if 'fdt-version' in kwargs:
         image_node += f"""
             fdt-version = {kwargs['fdt-version']};"""
+    if kwargs.get('cipher'):
+        cipher_props = kwargs['cipher']
+        image_node += f"""
+            cipher {{
+                 algo = "aes256";
+                 key-name-hint = "dev";
+                 iv = <{cipher_props['iv']}>;
+            }};"""
     image_node += f"""
             hash-1 {{
                 algo = "{kwargs.get('sha_algo', 'sha256')}";
@@ -190,6 +198,8 @@ def create_kernel_its(kwargs):
         'kernel-version': "<1>",
         **common_image_props
     }
+    if kwargs.get('cipher'):
+        kernel_image_props['cipher'] = kwargs['cipher']
     kernel_image_node = create_image_node(kernel_image_props)
 
     has_ramdisk = False
@@ -224,6 +234,8 @@ def create_kernel_its(kwargs):
         # Ensure ramdisk_image_props does not have 'entry_point'
         if 'entry_point' in ramdisk_image_props:
             del ramdisk_image_props['entry_point']
+        if kwargs.get('cipher'):
+            ramdisk_image_props['cipher'] = kwargs['cipher']
         ramdisk_image_node = create_image_node(ramdisk_image_props)
 
     dtb_load_addr = kwargs.get('dtb_load_addr')
@@ -245,6 +257,8 @@ def create_kernel_its(kwargs):
     # Ensure fdt_image_props does not have 'entry_point'
     if 'entry_point' in fdt_image_props:
         del fdt_image_props['entry_point']
+    if kwargs.get('cipher'):
+        fdt_image_props['cipher'] = kwargs['cipher']
     fdt_image_node = create_image_node(fdt_image_props)
 
     content = f"""
@@ -276,6 +290,35 @@ def hex_to_addr_tuple(hex_addr):
     high = (addr >> 32) & 0xFFFFFFFF
     low = addr & 0xFFFFFFFF
     return f"0x{high:x} 0x{low:08x}"
+
+def hex_to_iv_tuple(hex_iv):
+    """
+    Converts a hexadecimal IV to a tuple of four 32-bit hexadecimal numbers.
+
+    Args:
+        hex_iv (str): Hexadecimal IV string (e.g., "0x961e967b14d6307d81b93c2fd501ca20").
+
+    Returns:
+        str: A string containing four 32-bit hexadecimal numbers (e.g., "0x961e967b 0x14d6307d 0x81b93c2f 0xd501ca20").
+    """
+    if hex_iv is None:
+        return None
+    if not isinstance(hex_iv, str):
+        raise TypeError("hex_iv must be a string")
+
+    # Remove "0x" prefix if present
+    hex_iv = hex_iv[2:] if hex_iv.startswith("0x") else hex_iv
+
+    if len(hex_iv) != 32:
+        raise ValueError("hex_iv must be 32 characters long (256 bits)")
+
+    # Split the IV into four 8-character (32-bit) chunks
+    iv_part1 = hex_iv[0:8]
+    iv_part2 = hex_iv[8:16]
+    iv_part3 = hex_iv[16:24]
+    iv_part4 = hex_iv[24:32]
+
+    return f"0x{iv_part1} 0x{iv_part2} 0x{iv_part3} 0x{iv_part4}"
 
 def is_compressed(file_path, comp_type, debug):
     """
@@ -390,24 +433,23 @@ def check_and_compress(file_path, comp_type, debug=False):
         print(f"Error compressing {file_path}: {e}")
         return None
 
-def create_multi_spl_its(paths, default_addresses, sha_algo="sha256", rsa_algo="rsa2048", comp="none", debug=False):
+def create_multi_spl_its(params):
     """
     Generates the content of a multi_spl.its file.
 
     Args:
-        paths (dict): Dictionary containing paths to bl31, uboot, and tee images.
-        default_addresses (dict): Dictionary containing default addresses.
-        sha_algo (str, optional): SHA algorithm. Defaults to "sha256".
-        rsa_algo (str, optional): RSA algorithm. Defaults to "rsa2048".
-        comp (str, optional): Compression type. Defaults to "none".
-        debug (bool, optional): Enable debug output. Defaults to False.
-
-    Returns:
-        str: The content of the multi_spl.its file.
+        params (dict): Dictionary containing necessary parameters.
     """
+    paths = params['paths']
+    default_addresses = params['default_addresses']
+    sha_algo = params.get('sha_algo', "sha256")
+    rsa_algo = params.get('rsa_algo', "rsa2048")
+    comp = params.get('comp', "none")
+    debug = params.get('debug', False)
+    cipher_iv = params.get('cipher_iv', None)
 
     def create_image_node_kwargs(name, data_path, default_addr, sha_algo, comp):
-        return {
+        kwargs = {
             'node_name': name,
             'data_path': data_path,
             'description': default_addr['description'],
@@ -419,6 +461,9 @@ def create_multi_spl_its(paths, default_addresses, sha_algo="sha256", rsa_algo="
             'arch': "arm64",
             'compression': comp if comp != "none" else "none"
         }
+        if cipher_iv:
+            kwargs['cipher'] = {'iv': cipher_iv}
+        return kwargs
 
     # Compress images if compression is specified
     compressed_paths = {}
@@ -475,6 +520,16 @@ def create_multi_spl_its(paths, default_addresses, sha_algo="sha256", rsa_algo="
 """
     return content
 
+def ensure_uncompressed(path, debug):
+    """
+    Ensures that a file is not compressed using any supported compression type.
+    Exits if the file is compressed but compression is set to none.
+    """
+    for c_type in ["gzip", "lz4", "bzip2"]:
+        if is_compressed(path, c_type, debug):
+            print(f"Error: {path} is compressed with {c_type}, but compression is set to none.")
+            sys.exit(1)
+
 def main():
     parser = argparse.ArgumentParser(description='Generate ITS files for different firmware components.')
     parser.add_argument('--bl31', type=str, help='Path to ARM Trusted Firmware image')
@@ -494,6 +549,7 @@ def main():
     parser.add_argument('--rootfs_load_addr', type=str, help='Load address for the rootfs in hex format (e.g., 0x19000000)', default=None)
     parser.add_argument('-d', '--debug', action='store_true', help='Enable debug output', default=False)
     parser.add_argument('--multi_spl', action='store_true', help='Generate multi_spl.its', default=False)
+    parser.add_argument('--cipher_iv', type=str, help='IV for cipher in hex format (e.g., 0x...)', default=None)
 
     args = parser.parse_args()
 
@@ -516,6 +572,14 @@ def main():
         'fdt': {'load_addr': "0x118000000", 'entry_point': None}
     }
 
+    # Consolidate cipher_iv logic
+    cipher_iv = None
+    if args.cipher_iv:
+        try:
+            cipher_iv = hex_to_iv_tuple(args.cipher_iv)
+        except (TypeError, ValueError) as e:
+            parser.error(f"Invalid cipher_iv: {e}")
+
     img_types = ['bl31', 'uboot', 'tee', 'extlinux']
     if not args.multi_spl:
         for img_type in img_types:
@@ -523,10 +587,7 @@ def main():
             if path:
                 default_addr = default_addresses[img_type]
                 if args.comp == 'none':
-                    for c_type in ["gzip", "lz4", "bzip2"]:
-                        if is_compressed(path, c_type, args.debug):
-                            print(f"Error: {path} is compressed with {c_type}, but compression is set to none.")
-                            sys.exit(1)
+                    ensure_uncompressed(path, args.debug)
                 if args.comp != 'none':
                     path = check_and_compress(path, args.comp, args.debug)
 
@@ -545,7 +606,8 @@ def main():
                     'entry_point': entry_point,
                     'sha_algo': args.sha_algo,
                     'rsa_algo': args.rsa_algo,
-                    'compression': args.comp
+                    'compression': args.comp,
+                    'cipher': {'iv': cipher_iv} if cipher_iv else None
                 }
                 content = create_its(its_kwargs)
                 write_its(os.path.join(args.output_dir, f'{img_type}.its'), content)
@@ -566,10 +628,7 @@ def main():
             paths_to_check = {'kernel': kernel_path, 'dtb': dtb_path, 'rootfs': rootfs_path}
             for name, path in paths_to_check.items():
                 if path:
-                    for c_type in ["gzip", "lz4", "bzip2"]:
-                        if is_compressed(path, c_type, args.debug):
-                            print(f"Error: {path} is compressed with {c_type}, but compression is set to none.")
-                            sys.exit(1)
+                    ensure_uncompressed(path, args.debug)
 
         if args.comp != 'none':
             kernel_path = check_and_compress(kernel_path, args.comp, args.debug)
@@ -587,6 +646,7 @@ def main():
             'compression': args.comp,
             'dtb_load_addr': args.dtb_load_addr if args.dtb_load_addr else default_addresses['fdt']['load_addr'],
             'rootfs_load_addr': args.rootfs_load_addr if args.rootfs_load_addr else default_addresses['ramdisk']['load_addr'],
+            'cipher': {'iv': cipher_iv} if cipher_iv else None
         }
         kernel_content = create_kernel_its(kernel_kwargs)
         write_its(os.path.join(args.output_dir, 'kernel.its'), kernel_content)
@@ -598,11 +658,19 @@ def main():
         if args.comp == 'none':
             for img_type, path in paths.items():
                 if path:
-                    for c_type in ["gzip", "lz4", "bzip2"]:
-                        if is_compressed(path, c_type, args.debug):
-                            print(f"Error: {path} is compressed with {c_type}, but compression is set to none.")
-                            sys.exit(1)
-        content = create_multi_spl_its(paths, default_addresses, args.sha_algo, args.rsa_algo, args.comp, args.debug)
+                    ensure_uncompressed(path, args.debug)
+
+        params = {
+            'paths': paths,
+            'default_addresses': default_addresses,
+            'sha_algo': args.sha_algo,
+            'rsa_algo': args.rsa_algo,
+            'comp': args.comp,
+            'debug': args.debug,
+            'cipher_iv': cipher_iv
+        }
+
+        content = create_multi_spl_its(params)
         write_its(os.path.join(args.output_dir, 'multi_spl.its'), content)
 
 if __name__ == "__main__":
