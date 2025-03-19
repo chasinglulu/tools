@@ -1,0 +1,6 @@
+*.o
+.*
+!.gitignore
+downloads/
+src/abc_tool/abc_tool
+*.patch
