@@ -182,6 +182,18 @@ def load_and_validate_json(input_file):
     if duplicates:
         raise ValueError(f"Duplicate partition names found in the JSON data: {', '.join(duplicates)}")
 
+    for partition in json_partitions:
+        if 'flags' in partition:
+            flags_value = partition['flags']
+            if flags_value not in ['no-image', 'not-selected']:
+                raise ValueError(f"Invalid value for 'flags' field: {flags_value}. Allowed values are 'no-image' and 'not-selected'.")
+
+        if 'attrs' in partition:
+            attrs_value = partition['attrs']
+            allowed_attrs = ['ro', 'bootable', 'ro,bootable', 'bootable,ro']
+            if attrs_value not in allowed_attrs:
+                raise ValueError(f"Invalid value for 'attrs' field: {attrs_value}. Allowed values are 'ro', 'bootable', 'ro,bootable', and 'bootable,ro'.")
+
     return json_partitions, json_unit
 
 def create_xml_elements(args, unit_value):
@@ -245,10 +257,15 @@ def generate_images(args, json_partitions):
     exclude_names = {"emmc", "nand", "nor", "hyper"}
     for partition in json_partitions:
         if partition['name'].lower() not in exclude_names:
+            # Check if the partition has the 'flags' key and if it's set to 'no-image'
+            if 'flags' in partition and 'no-image' in partition['flags']:
+                continue  # Skip this partition
+            flag_value = "1" if 'flags' in partition and 'not-selected' in partition['flags'] else "3"
+            select_value = "0" if 'flags' in partition and 'not-selected' in partition['flags'] else "1"
             images.append({
-                "flag": "1",
+                "flag": flag_value,
                 "name": partition['name'].upper(),
-                "select": "1",
+                "select": select_value,
                 "id": partition['name'].upper(),
                 "type": "CODE",
                 "base": "0x0",
