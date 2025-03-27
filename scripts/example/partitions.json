@@ -7,9 +7,15 @@
 				"size": "0"
 			},
 			{
+				"name": "metadata",
+				"size": "128",
+				"flags": "no-image"
+			},
+			{
 				"name": "atf_a",
 				"size": "512",
-				"attrs": "ro"
+				"attrs": "ro",
+				"flags": "not-selected"
 			},
 			{
 				"name": "atf_b",
