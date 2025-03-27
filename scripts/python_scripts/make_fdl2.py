@@ -33,7 +33,7 @@ def parse_command_line_arguments() -> Tuple[optparse.Values, list]:
 
 def validate_options(opts: optparse.Values) -> None:
     """Validate command line arguments."""
-    if not isinstance(opts.sizeof_header, int) or opts.sizeof_header <= 0:
+    if not isinstance(opts.sizeof_header, int) or opts.sizeof_header < 0:
         raise ValueError("sizeof_header must be a positive integer")
     if not isinstance(opts.offset, int) or opts.offset < 0:
         raise ValueError("offset must be a non-negative integer")
