@@ -90,11 +90,19 @@ def convert_to_mtdparts(json_partitions, json_unit):
     return mtdparts.rstrip(',')
 
 def handle_mtdparts(args, json_partitions, json_unit):
-    if args.mtdparts:
+    if args.mtdparts or args.mtdparts_file:
         mtdparts_str = convert_to_mtdparts(json_partitions, json_unit).lstrip()
-        print("MTD Parts: ")
-        print("                   mtdparts=" + mtdparts_str)
-        print("    CONFIG_MTDPARTS_DEFAULT=" + mtdparts_str)
+        if args.mtdparts:
+            print("MTD Parts: ")
+            print("                   mtdparts=" + mtdparts_str)
+            print("    CONFIG_MTDPARTS_DEFAULT=" + mtdparts_str)
+        if args.mtdparts_file:
+            try:
+                with open(args.mtdparts_file, 'w') as f:
+                    f.write(mtdparts_str)
+                print(f"MTD parts string written to: {args.mtdparts_file}")
+            except Exception as e:
+                print(f"Error writing to {args.mtdparts_file}: {e}")
 
 def is_hex(value):
     return re.fullmatch(r'0x[0-9a-fA-F]+', value) is not None
@@ -135,6 +143,7 @@ def parse_arguments():
     parser.add_argument('-t', '--strategy', default='1', choices=['0', '1'], help='Partitions strategy')
     parser.add_argument('-s', '--secureboot', action='store_true', default=False, help='Include EIP image in ImgList')
     parser.add_argument('-v', '--version', default='1.0', help='Project version')
+    parser.add_argument('-mf', '--mtdparts_file', default=None, help='Output file for mtdparts string')
     args = parser.parse_args()
 
     # Validate input file
