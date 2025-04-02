@@ -19,7 +19,7 @@ parse_arguments() {
             b) SECURE_BOOT=TRUE ;;
             g) SUPPORT_GZIPD=TRUE ;;
             l) LIBC_NAME=$OPTARG ;;
-            n) PROJECT=$OPTARG ;;
+            n) PLATFORM=$OPTARG ;;
             o) SUPPORT_OPTEE=TRUE ;;
             s) SENSOR_MODEL=$OPTARG ;;
             t) SUPPORT_ATF=TRUE ;;
@@ -33,7 +33,7 @@ parse_arguments() {
 
     debug "Arguments parsed:"
     debug "  SUPPORT_OPTEE=$SUPPORT_OPTEE"
-    debug "  PROJECT=$PROJECT"
+    debug "  PLATFORM=$PLATFORM"
     debug "  SENSOR_MODEL=$SENSOR_MODEL"
     debug "  BUILD_UBUNTU_AXP=$BUILD_UBUNTU_AXP"
     debug "  VERSION=$VERSION"
@@ -54,7 +54,7 @@ print_usage() {
     echo "  -h  Show this help message"
     echo "  -l  Specify libc name (e.g. glibc)"
     echo "  -o  Support OPTEE"
-    echo "  -n  Project name (e.g. m57h_nand)"
+    echo "  -n  Platform name (e.g. axera_fpga)"
     echo "  -s  Sensor Model"
     echo "  -t  Support ATF"
     echo "  -u  Build Ubuntu AXP"
@@ -62,7 +62,7 @@ print_usage() {
     echo "  -x  Enable debug output"
     echo
     echo "Example:"
-    echo "  $0 -p my_project -v 1.0.0 -l glibc -a -b"
+    echo "  $0 -p my_platform -v 1.0.0 -l glibc -a -b"
 }
 
 # Debug output function
@@ -74,16 +74,17 @@ debug() {
 
 # Generate AXP filename
 generate_axp_filename() {
+    PROJECT=${PLATFORM#*\_}
     debug "Generating AXP filename..."
     CHIP_NAME=${PROJECT%\_*}
     VERSION_EXT=${VERSION}_$(date "+%Y%m%d%H%M%S")
 
     if [ -z "$SENSOR_MODEL" ]; then
-        AXP_NAME=${PROJECT}_${VERSION_EXT}
+        AXP_NAME=${PLATFORM}_${VERSION_EXT}
         [ -n "$LIBC_NAME" ] && AXP_NAME+=_${LIBC_NAME}
     else
         SENSOR_MODEL=$(echo $SENSOR_MODEL | tr ' ' '_')
-        AXP_NAME=${PROJECT}_${SENSOR_MODEL}_${VERSION_EXT}
+        AXP_NAME=${PLATFORM}_${SENSOR_MODEL}_${VERSION_EXT}
         [ -n "$LIBC_NAME" ] && AXP_NAME+=_${LIBC_NAME}
     fi
     AXP_NAME+=.axp
@@ -93,6 +94,9 @@ generate_axp_filename() {
         debug "AXP_UBUNTU_ROOTFS_NAME=$AXP_UBUNTU_ROOTFS_NAME"
     fi
 
+    debug "PROJECT=$PROJECT"
+    debug "CHIP_NAME=$CHIP_NAME"
+    debug "VERSION_EXT=$VERSION_EXT"
     debug "AXP_NAME=$AXP_NAME"
 }
 
@@ -103,16 +107,13 @@ initialize_paths() {
     HOME_PATH=$LOCAL_PATH/..
     OUTPUT_PATH=$LOCAL_PATH/out
     IMG_PATH=$OUTPUT_PATH/$PROJECT/images
+    SAFE_IMG_PATH=$OUTPUT_PATH/$PROJECT/images/SafetyIsland
+    ENV_PATH=$OUTPUT_PATH/$PROJECT/images/ota_env.txt
     AXP_PATH=$OUTPUT_PATH/$AXP_NAME
-    # GEN_AXP_TOOL=$HOME_PATH/build/scripts/create_axp.py
-    # GEN_XML_TOOL=$HOME_PATH/build/scripts/convert.py
-    GEN_AXP_TOOL=/home/charleye/24-Xen/tools/scripts/python_scripts/create_axp.py
-    GEN_XML_TOOL=/home/charleye/24-Xen/tools/scripts/python_scripts/convert.py
-    # PAC_XML_PATH=$HOME_PATH/build/out/$PROJECT/images/$PROJECT.xml
-    # TEMPLATE_XML_PATH=$HOME_PATH/build/projects/${PROJECT}/${PROJECT}.xml
-    JSON_PATH=/home/charleye/24-Xen/tools/scripts/python_scripts/$PROJECT.json
-    PAC_XML_PATH=/home/charleye/24-Xen/tools/scripts/python_scripts/$PROJECT.xml
-    TEMPLATE_XML_PATH=/home/charleye/24-Xen/tools/scripts/python_scripts/template.xml
+    GEN_AXP_TOOL=$HOME_PATH/build/scripts/create_axp.py
+    GEN_XML_TOOL=$HOME_PATH/build/scripts/convert.py
+    JSON_PATH=$HOME_PATH/build/out/$PROJECT/images/$PROJECT.json
+    PAC_XML_PATH=$HOME_PATH/build/out/$PROJECT/images/$PROJECT.xml
     if [ "$BUILD_UBUNTU_AXP" = "TRUE" ] ; then
         AXP_UBUNTU_ROOTFS_PATH=$OUTPUT_PATH/$AXP_UBUNTU_ROOTFS_NAME
     fi
@@ -128,7 +129,6 @@ initialize_paths() {
     debug "  JSON_PATH=$JSON_PATH"
     debug "  PAC_XML_PATH=$PAC_XML_PATH"
     debug "  PROJECT_MAK=$PROJECT_MAK"
-    debug "  TEMPLATE_XML_PATH=$TEMPLATE_XML_PATH"
     if [ "$BUILD_UBUNTU_AXP" = "TRUE" ] ; then
         debug "  AXP_UBUNTU_ROOTFS_PATH=$AXP_UBUNTU_ROOTFS_PATH"
     fi
@@ -138,18 +138,40 @@ initialize_paths() {
 initialize_image_paths() {
     debug "Initializing image paths..."
 
+    # This script sets up various environment variables pointing to image files
+    # used in the build process. The variables are defined as follows:
+    #
+    # FDL1_PATH: Path to the fdl1_signed.img file.
+    # SBL_PATH: Path to the sbl_signed.img file.
+    # SBL_A_PATH: Path to the sbl_signed.img file (alternative A).
+    # SBL_B_PATH: Path to the sbl_signed.img file (alternative B).
+    # RTOS_PATH: Path to the Mcal_Demo_signed.img file.
+    # RTOS_A_PATH: Path to the Mcal_Demo_signed.img file (alternative A).
+    # RTOS_B_PATH: Path to the Mcal_Demo_signed.img file (alternative B).
+    # SPL_PATH: Path to the u-boot-spl_signed.img file.
+    # SPL_A_PATH: Path to the u-boot-spl_signed.img file (alternative A).
+    # SPL_B_PATH: Path to the u-boot-spl_signed.img file (alternative B).
+    #
+    # Note:
+    # These images are loaded by the Safety domain, regardless of whether
+    # secure boot is enabled. The same image is used in all cases, and even though
+    # the filenames include "signed", these images have headers and signature data added.
+    FDL1_PATH=$SAFE_IMG_PATH/fdl1_signed.img
+    SBL_PATH=$SAFE_IMG_PATH/sbl_signed.img
+    SBL_A_PATH=$SAFE_IMG_PATH/sbl_signed.img
+    SBL_B_PATH=$SAFE_IMG_PATH/sbl_signed.img
+    RTOS_PATH=$SAFE_IMG_PATH/Mcal_Demo_signed.img
+    RTOS_A_PATH=$SAFE_IMG_PATH/Mcal_Demo_signed.img
+    RTOS_B_PATH=$SAFE_IMG_PATH/Mcal_Demo_signed.img
+    SPL_PATH=$IMG_PATH/u-boot-spl_signed.img
+    SPL_A_PATH=$IMG_PATH/u-boot-spl_signed.img
+    SPL_B_PATH=$IMG_PATH/u-boot-spl_signed.img
+
     if [ "$SECURE_BOOT" = "TRUE" ]; then
-        # cp $HOME_PATH/build/tools/imgsign/eip_m57h.bin $IMG_PATH/eip_m57h.img
+        cp $HOME_PATH/build/scripts/imgsign/eip130_fw.bin $IMG_PATH/eip_m57h.img
 
         EIP_PATH=$IMG_PATH/eip_m57h.img
-        FDL1_PATH=$IMG_PATH/fdl1_signed.img
         FDL2_PATH=$IMG_PATH/fdl2_signed.img
-        SBL_PATH=$IMG_PATH/sbl_signed.img
-        SBL_A_PATH=$IMG_PATH/sbl_signed.img
-        SBL_B_PATH=$IMG_PATH/sbl_signed.img
-        SPL_PATH=$IMG_PATH/u-boot-spl_signed.img
-        SPL_A_PATH=$IMG_PATH/u-boot-spl_signed.img
-        SPL_B_PATH=$IMG_PATH/u-boot-spl_signed.img
         UBOOT_PATH=$IMG_PATH/u-boot_signed.img
         UBOOT_A_PATH=$IMG_PATH/u-boot_signed.img
         UBOOT_B_PATH=$IMG_PATH/u-boot_signed.img
@@ -157,14 +179,7 @@ initialize_image_paths() {
         KERNEL_A_PATH=$IMG_PATH/kernel_signed.img
         KERNEL_B_PATH=$IMG_PATH/kernel_signed.img
     else
-        FDL1_PATH=$IMG_PATH/fdl1.img
         FDL2_PATH=$IMG_PATH/fdl2.img
-        SBL_PATH=$IMG_PATH/sbl.img
-        SBL_A_PATH=$IMG_PATH/sbl.img
-        SBL_B_PATH=$IMG_PATH/sbl.img
-        SPL_PATH=$IMG_PATH/u-boot-spl.img
-        SPL_A_PATH=$IMG_PATH/u-boot-spl.img
-        SPL_B_PATH=$IMG_PATH/u-boot-spl.img
         UBOOT_PATH=$IMG_PATH/u-boot.img
         UBOOT_A_PATH=$IMG_PATH/u-boot.img
         UBOOT_B_PATH=$IMG_PATH/u-boot.img
@@ -201,14 +216,14 @@ initialize_image_paths() {
         fi
     fi
 
-    ROOTFS_PATH=$IMG_PATH/rootfs_sparse.ext4
+    ROOTFS_PATH=$IMG_PATH/rootfs_sparse_ext4.img
     PARAM_PATH=$IMG_PATH/param_sparse.ext4
-    SOC_PATH=$IMG_PATH/soc_sparse.ext4
-    OPT_PATH=$IMG_PATH/opt_sparse.ext4
+    SOC_PATH=$IMG_PATH/soc_sparse_ext4.img
+    OPT_PATH=$IMG_PATH/opt_sparse_ext4.img
     CUSTOMER_PATH=$IMG_PATH/customer.img
     MODEL_PATH=$IMG_PATH/model.img
     if [ "$BUILD_UBUNTU_AXP" = "TRUE" ]; then
-        UBUNTU_ROOTFS_PATH=$IMG_PATH/ubuntu_rootfs_sparse.ext4
+        UBUNTU_ROOTFS_PATH=$IMG_PATH/ubuntu_rootfs_sparse_ext4.img
     fi
 
     debug "Image paths initialized:"
@@ -258,6 +273,10 @@ initialize_project_specific_paths() {
         :
     elif [[ "$PROJECT" =~ "fpga" ]] ;then
         :
+    elif [[ "$PROJECT" =~ "demo_nor_nand" ]] ;then
+        :
+    elif [[ "$PROJECT" =~ "evb" ]] ; then
+        :
     else
         echo "Error: Unsupported project name: $PROJECT"
         exit 1
@@ -297,9 +316,9 @@ main() {
 
     parse_arguments "$@"
 
-    if [ -z "$PROJECT" ]; then
-        echo "PROJECT is not set. Using default value: m57h"
-        PROJECT="m57h"
+    if [ -z "$PLATFORM" ]; then
+        echo "PLATFORM is not set. Using default value: axera_m57h"
+        PROJECT="axera_m57h"
     fi
 
     if [ -z "$VERSION" ]; then
@@ -315,7 +334,7 @@ main() {
     debug "Chip SoC Name: $CHIP_NAME"
 
     # Construct the XML generation command
-    XML_GEN_CMD="python3 $GEN_XML_TOOL -n $PROJECT -v $VERSION -i $JSON_PATH -o $PAC_XML_PATH"
+    XML_GEN_CMD="python3 $GEN_XML_TOOL -n $PROJECT -v $VERSION -i $JSON_PATH -o $PAC_XML_PATH -mf $ENV_PATH"
     if [ "$SECURE_BOOT" = "TRUE" ]; then
         XML_GEN_CMD+=" -s"
     fi
@@ -381,6 +400,8 @@ main() {
         echo "Error: AXP generation failed with code $AXP_RETURN_CODE" >&2
         exit 1
     fi
+    echo "AXP_PATH=\"$AXP_PATH\"" >> $ENV_PATH
+    echo "VERSION=\"$VERSION\"" >> $ENV_PATH
 }
 
 main "$@"
