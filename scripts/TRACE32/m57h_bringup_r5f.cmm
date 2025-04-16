@@ -1,0 +1,41 @@
+; --------------------------------------------------------------------------------
+; @Title: Startup script for the ARM R5F from axera
+; @Description: 
+; --------------------------------------------------------------------------------
+
+;RESet
+;SYStem.RESET
+;SWD.on
+
+SYStem.CPU CortexR5F
+
+SYStem.CONFIG DEBUGACCESSPORT 0.
+SYStem.CONFIG APBACCESSPORT 0.
+SYStem.CONFIG MEMORYACCESSPORT 1.
+;SYStem.CONFIG AHBACCESSPORT 0.
+SYStem.CONFIG AXIACCESSPORT 1.
+
+SYStem.CONFIG COREDEBUG Base DAP:0x84102000
+SYStem.CONFIG CTI       Base DAP:0x84101000
+System.CONFIG.CTI.Config ARMV1
+
+SYStem.JtagClock 3MHz
+SYStem.CONFIG.DEBUGPORTTYPE SWD
+
+SYStem.Mode Up
+SYStem.Mode Attach
+
+
+break
+
+; data.load.binary  D:\sbl.bin   0x200000
+; data.load.binary  D:\u-boot-spl_signed.img  0x14001000
+
+; register.set pc 0x200000
+
+; PER.Set.simple C15:0x1 %Long 0xe52878
+
+GO
+
+
+ENDDO

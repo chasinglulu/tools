@@ -1,0 +1,85 @@
+; --------------------------------------------------------------------------------
+; @Title: Startup script for the ARM A55x8 Cortex-A55 board
+; @Description: 
+; This script configures the base addresses for debug and attaches to the core
+; @Keywords: AARCH, ARMv8, ARM64, armcc, Cortex-A55, A55x8, SMM
+; @Author: bschroefel
+; @Board: ARM A55x8 SMM
+; @Copyright: (C) 1989-2019 Lauterbach GmbH, licensed for use with TRACE32(R) only
+; --------------------------------------------------------------------------------
+
+RESet
+SYStem.RESET
+SYStem.CPU CortexA55
+SYStem.CONFIG CoreNumber 1.
+CORE.NUMber 1.
+
+SYStem.CONFIG DEBUGACCESSPORT 0.
+SYStem.CONFIG APBACCESSPORT 0.
+SYStem.CONFIG MEMORYACCESSPORT 1.
+; SYStem.CONFIG AHBACCESSPORT 0.
+SYStem.CONFIG AXIACCESSPORT 1.
+
+SYStem.CONFIG.DEBUGPORTTYPE SWD
+SYStem.Option PWRREQ ON
+
+SYStem.CONFIG COREDEBUG Base DAP:0x84124000
+SYStem.CONFIG CTI       Base DAP:0x84134000
+
+; SYStem.CONFIG COREDEBUG Base DAP:0x80024000 ;DAP:0x80005000 DAP:0x80006000 DAP:0x80007000 0x80024000 DAP:0x80025000 DAP:0x80026000 DAP:0x80027000 
+; SYStem.CONFIG CTI       Base DAP:0x80034000 ;DAP:0x80015000 DAP:0x80016000 DAP:0x80017000 0x80034000 DAP:0x80035000 DAP:0x80036000 DAP:0x80037000 DAP:0x80002000
+; SYStem.CONFIG BMC       Base DAP:0x8100C000 DAP:0x8000D000 DAP:0x8000E000 DAP:0x8000F000 0x8002C000 DAP:0x8002D000 DAP:0x8002E000 DAP:0x8002F000
+; SYStem.CONFIG ETM       Base DAP:0x8101C000 DAP:0x8001D000 DAP:0x8001E000 DAP:0x8001F000 0x8003C000 DAP:0x8003D000 DAP:0x8003E000 DAP:0x8003F000
+; SYStem.CONFIG ELA       Base DAP:0x81008000 DAP:0x80009000 DAP:0x8000A000 DAP:0x8000B000 0x80028000 DAP:0x80029000 DAP:0x8002A000 DAP:0x8002B000 DAP:0x80001000
+; SYStem.CONFIG AMU       Base DAP:0x81018000 DAP:0x80019000 DAP:0x8001A000 DAP:0x8001B000 0x80038000 DAP:0x80039000 DAP:0x8003A000 DAP:0x8003B000
+
+;GIC configure
+SYStem.CONFIG GICD Type GIC400
+SYStem.CONFIG GICD Base  AD:0x08001000
+SYStem.CONFIG GICC Base  AD:0x08002000
+SYStem.CONFIG GICH Base  AD:0x08004000
+SYStem.CONFIG GICV Base  AD:0x08006000
+
+SYStem.JtagClock 4MHz
+
+SYStem.Mode Up
+
+SYStem.Mode Attach
+IF STATE.RUN()
+  Break.direct
+
+; break
+
+; Load Images into OCM & DDR
+; NOTE: whether the FILE Name is correct
+
+data.load.binary u-boot-spl.bin 0x14001000
+; data.load.binary bl31.bin 0x100104000
+; data.load.binary u-boot.bin 0x100200000
+data.load.binary u-boot.img 0x100200000
+data.load.binary Image 0x110000000
+data.load.binary m57h-fpga.dtb 0x118000000
+
+; rootfs.cpio.lz4 built-in into kernel Image
+; Do not need load this rootfs.cpio.lz4
+; data.load.binary rootfs.cpio.lz4 0x119000000
+; data.load.binary rootfs-new.cpio.lz4 0x119000000
+
+; Load debuginfo symbol
+; data.load.elf vmlinux /nocode /strippart 5
+; 0x1fff03000
+; SYMBOL.SOURCEPATH.SETRECURSEDIR Y:\27-Laguna\linux-new
+
+; data.load.elf u-boot /nocode /strippart 4
+; SYMBOL.SOURCEPATH.SETRECURSEDIR Y:\27-Laguna\u-boot
+
+; data.load.elf bl31.elf /nocode /strippart 4
+; SYMBOL.SOURCEPATH.SETRECURSEDIR Y:\27-Laguna\arm-trusted-firmware
+
+register.set pc 0x14001000
+
+WAIT 1S
+
+GO
+
+ENDDO
