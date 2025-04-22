@@ -1,26 +1,30 @@
 #!/usr/bin/env bash
+#
+# SPDX-License-Identifier: GPL-2.0+
+#
+# Copyright (C) 2025 Charleye <wangkart@aliyun.com>
+#
+# Runs package_rootfs.sh, updates kernel rootfs, rebuilds kernel, copies images.
+#
 
-# Default values
-WORKSPACE=""
 PLATFORM=""
+DEBUG_MODE=false
 
-# Function to print usage
 usage() {
-    echo "Usage: $0 [-h] -w <workspace> -p <platform>"
+    echo "Usage: $0 [-hd] -p <platform>"
     echo "  -h: Show help message"
-    echo "  -w <workspace>: Specify the workspace directory"
+    echo "  -d: Enable debug mode (set -x)"
     echo "  -p <platform>: Specify the platform"
     exit 1
 }
 
-# Parse command line options
-while getopts "hw:p:" opt; do
+while getopts "hdp:" opt; do
     case $opt in
-        w)
-            WORKSPACE="$OPTARG"
-            ;;
         p)
             PLATFORM="$OPTARG"
+            ;;
+        d)
+            DEBUG_MODE=true
             ;;
         h)
             usage
@@ -32,130 +36,86 @@ while getopts "hw:p:" opt; do
     esac
 done
 
-# Remove parsed options
 shift $((OPTIND-1))
 
 # Check if required arguments are provided
-if [ -z "$WORKSPACE" ] || [ -z "$PLATFORM" ]; then
-    echo "WORKSPACE and PLATFORM must be specified."
+if [ -z "$PLATFORM" ]; then
+    echo "PLATFORM must be specified."
     usage
 fi
 
-CURR_DIR=$(cd $WORKSPACE/build;pwd)
-ROOTFS_CPIO_LZ4=$WORKSPACE/build/out/$PLATFORM/objs/kernel/linux/linux-6.1.83/rootfs.cpio.lz4
-ROOTFS_FULL_DEVICES_TABLE=$CURR_DIR/tools/full_devices_table.txt
-ROOTFS_DIR=$CURR_DIR/rootfs
-FAKEROOT_SCRIPT=$ROOTFS_DIR/fakeroot
-TARGET_DIR=$ROOTFS_DIR/target
+# Determine BUILD_DIR based on script location relative to build directory
+# Assuming this script is in build/scripts/
+BUILD_DIR=$(cd "$(dirname "$0")/.." ; pwd)
+WORKSPACE=$(cd "$BUILD_DIR/.." ; pwd)
 
-# Function to detect Ubuntu version
-os_version() {
-    if [ -f /etc/os-release ]; then
-        if grep -q "Ubuntu" /etc/os-release; then
-            VERSION_ID=$(grep "VERSION_ID" /etc/os-release | cut -d\" -f2)
-            echo "$VERSION_ID"
-            return 0
-        fi
-    fi
-    return 1
-}
+INITIAL_ROOTFS_CPIO_LZ4=$WORKSPACE/build/out/$PLATFORM/objs/kernel/linux/linux-6.1.83/rootfs.cpio.lz4
+PACKAGED_ROOTFS_PATH="$WORKSPACE/build/out/$PLATFORM/images/rootfs_full.cpio.lz4"
+PACKAGE_SCRIPT="$BUILD_DIR/scripts/package_rootfs.sh"
 
-# Function to copy files
-cp_file() {
-    src=$1
-    dest=$2
-    if [ -d "$src" ]; then
-        cp -r "$src" "$dest"
-    elif [ -f "$src" ]; then
-        cp "$src" "$dest"
-    else
-        echo "Warning: Source '$src' does not exist."
-    fi
-}
-
-# Function to create rootfs structure
-mk_rootfs() {
-    mkdir -p "$ROOTFS_DIR"
-    mkdir -p "$TARGET_DIR"
-
-    cp_file "$ROOTFS_CPIO_LZ4" "$ROOTFS_DIR"
-    lz4 -d "$ROOTFS_DIR/rootfs.cpio.lz4" "$ROOTFS_DIR/rootfs.cpio"
-    cpio -i -F "$ROOTFS_DIR/rootfs.cpio" -D "$TARGET_DIR"
-
-    cp_file "$WORKSPACE/msp/out/bin" "$TARGET_DIR/usr/"
-    cp_file "$WORKSPACE/msp/out/lib" "$TARGET_DIR/usr/"
-    cp_file "$WORKSPACE/msp/out/etc" "$TARGET_DIR/"
-
-    mkdir -p "$TARGET_DIR/opt/ko"
-    find "$WORKSPACE/build/out/$PLATFORM/objs/kernel/linux/linux-6.1.83/" -name "*.ko" | xargs -I {} cp {} "$TARGET_DIR/opt/ko/"
-    find "$WORKSPACE/build/out/$PLATFORM/objs/kernel/osdrv/out/ko/" -name "*.ko" | xargs -I {} cp {} "$TARGET_DIR/opt/ko/"
-}
-
-# Function to generate fakeroot script
-mk_fakeroot_script() {
-    echo '#!/usr/bin/env bash' > "$FAKEROOT_SCRIPT"
-    echo "set -e" >> "$FAKEROOT_SCRIPT"
-
-    echo "chown -h -R 0:0 $TARGET_DIR" >> "$FAKEROOT_SCRIPT"
-    echo "chown -h -R 100:101 $TARGET_DIR/var/empty" >> "$FAKEROOT_SCRIPT"
-    echo "$CURR_DIR/tools/bin/makedevs -d $ROOTFS_FULL_DEVICES_TABLE $TARGET_DIR" >> "$FAKEROOT_SCRIPT"
-    echo "mkdir -p $TARGET_DIR/dev" >> "$FAKEROOT_SCRIPT"
-    echo "mknod -m 0622 $TARGET_DIR/dev/console c 5 1" >> "$FAKEROOT_SCRIPT"
-
-    echo "find $TARGET_DIR/run/ -mindepth 1 -prune -print0 | xargs -0r rm -rf --" >> "$FAKEROOT_SCRIPT"
-    echo "find $TARGET_DIR/tmp/ -mindepth 1 -prune -print0 | xargs -0r rm -rf --" >> "$FAKEROOT_SCRIPT"
-
-    echo "cd $TARGET_DIR && find . | LC_ALL=C sort | cpio --quiet -o -H newc -F $ROOTFS_DIR/rootfs_full.cpio" >> "$FAKEROOT_SCRIPT"
-
-    chmod a+x "$FAKEROOT_SCRIPT"
-}
-
-# Function to rebuild kernel and copy images
 build_kernel() {
-    lz4 -l -9 "$ROOTFS_DIR/rootfs_full.cpio" "$ROOTFS_DIR/rootfs_full.cpio.lz4"
+    echo "Updating rootfs for kernel build..."
+    # Copy the full rootfs created by package_rootfs.sh back to the location kernel build expects
+    if [ -f "$PACKAGED_ROOTFS_PATH" ]; then
+        mkdir -p "$(dirname "$INITIAL_ROOTFS_CPIO_LZ4")"
+        cp "$PACKAGED_ROOTFS_PATH" "$INITIAL_ROOTFS_CPIO_LZ4" || { echo "Failed to copy packaged rootfs to kernel build location"; exit 1; }
+    else
+        echo "Error: Packaged rootfs '$PACKAGED_ROOTFS_PATH' not found after running package_rootfs.sh."
+        exit 1
+    fi
 
-    cp_file "$ROOTFS_DIR/rootfs_full.cpio.lz4" "$ROOTFS_CPIO_LZ4"
+    # Check if kernel source directory exists
+    if [ ! -d "$WORKSPACE/kernel/linux" ]; then
+        echo "Warning: Kernel source directory '$WORKSPACE/kernel/linux' not found. Skipping kernel rebuild."
+        return
+    fi
 
+    echo "Rebuilding kernel..."
     cd "$WORKSPACE/kernel/linux"
-    make PLAT="$PLATFORM" linux-rebuild
+    make PLAT="$PLATFORM" linux-rebuild || { echo "Kernel rebuild failed"; exit 1; }
 
     local IMG_DIR="$WORKSPACE/build/out/$PLATFORM/images/"
     local KERNEL_DIR="$WORKSPACE/build/out/$PLATFORM/objs/kernel/linux/linux-6.1.83/arch/arm64/boot/"
 
-    cp_file "$ROOTFS_DIR/rootfs_full.cpio.lz4" "$IMG_DIR"
-    cp_file "$KERNEL_DIR/Image" "$IMG_DIR/Image_full"
-    cp_file "$KERNEL_DIR/Image.gz" "$IMG_DIR/Image_full.gz"
+    echo "Copying kernel images..."
+    mkdir -p "$IMG_DIR"
+    if [ -f "$KERNEL_DIR/Image" ]; then
+        cp "$KERNEL_DIR/Image" "$IMG_DIR/Image_full"
+    else
+        echo "Warning: Kernel image '$KERNEL_DIR/Image' not found."
+    fi
+    if [ -f "$KERNEL_DIR/Image.gz" ]; then
+        cp "$KERNEL_DIR/Image.gz" "$IMG_DIR/Image_full.gz"
+    else
+        echo "Warning: Kernel image '$KERNEL_DIR/Image.gz' not found."
+    fi
 }
 
 # Main script execution
-if [ ! -e "$ROOTFS_CPIO_LZ4" ]
+if [ ! -e "$INITIAL_ROOTFS_CPIO_LZ4" ]
 then
+    echo "Initial rootfs '$INITIAL_ROOTFS_CPIO_LZ4' not found. Exiting."
     exit 0
 fi
 
-set -x
-
-# Use system fakeroot if available, otherwise use the local one
-if which fakeroot >/dev/null 2>&1; then
-    FAKEROOT=$(which fakeroot)
-else
-    # Check Ubuntu version before using local fakeroot
-    if os_version; then
-        UBUNTU_VERSION=$(os_version)
-        if [ "$UBUNTU_VERSION" != "20.04" ]; then
-            echo "ERROR: Local fakeroot was compiled on Ubuntu 20.04 and is only compatible with Ubuntu 20.04."
-            exit 1
-        fi
-    fi
-    export FAKEROOT_PREFIX=$CURR_DIR/tools
-    FAKEROOT=$CURR_DIR/tools/bin/fakeroot
+if [ "$DEBUG_MODE" = true ]; then
+    echo "Debug mode enabled."
+    set -x
 fi
 
-mk_rootfs
-mk_fakeroot_script
+set -e # Enable exit on error for the main part
 
-FAKEROOTDONTTRYCHOWN=1 $FAKEROOT -- "$FAKEROOT_SCRIPT"
+echo "Running package_rootfs.sh to prepare full rootfs..."
+package_args=("-r" "$INITIAL_ROOTFS_CPIO_LZ4" "-p" "$PLATFORM")
+if [ "$DEBUG_MODE" = true ]; then
+    package_args+=("-d")
+fi
 
+# Execute package_rootfs.sh
+"$PACKAGE_SCRIPT" "${package_args[@]}" || { echo "package_rootfs.sh failed"; exit 1; }
+
+echo "Building kernel and copying images..."
 build_kernel
 
-rm -rf "$ROOTFS_DIR"
+echo "Fixup process complete."
+exit 0
