@@ -74,16 +74,31 @@ def create_ubifs_image(options):
             mkfs_ubifs (str, optional): Path to the mkfs.ubifs executable directory. Defaults to None.
     """
 
-    mkfs_ubifs_cmd = os.path.join(options.get("mkfs_ubifs", ""), "mkfs.ubifs") if options.get("mkfs_ubifs") else "mkfs.ubifs"
+    mkfs_ubifs_cmd = None
+    specific_mkfs_ubifs_path = options.get("mkfs_ubifs")
 
-    if not check_command_exists(mkfs_ubifs_cmd):
-        if options.get("mkfs_ubifs"):
-            print(f"Error: {mkfs_ubifs_cmd} command not found.")
-            print(f"Please provide the correct path. Example: {os.path.dirname(options['mkfs_ubifs'])}/mkfs.ubifs")
+    if specific_mkfs_ubifs_path:
+        potential_cmd = os.path.join(specific_mkfs_ubifs_path, "mkfs.ubifs")
+        if check_command_exists(potential_cmd):
+            mkfs_ubifs_cmd = potential_cmd
+            print(f"Using '{specific_mkfs_ubifs_path}/mkfs.ubifs'")
         else:
-            print(f"Error: {mkfs_ubifs_cmd} command not found.")
-            print("Please install it, e.g., with: sudo apt-get install mtd-utils")
-        sys.exit(1)
+            print(f"Warning: mkfs.ubifs not found at path: {specific_mkfs_ubifs_path}. Trying system path.")
+
+    if mkfs_ubifs_cmd is None:
+        default_cmd = "mkfs.ubifs"
+        if check_command_exists(default_cmd):
+            mkfs_ubifs_cmd = default_cmd
+            print(f"Using system mkfs.ubifs")
+        else:
+            error_msg = f"Error: {RED}'mkfs.ubifs' command not found.{RESET}\n"
+            if specific_mkfs_ubifs_path:
+                error_msg += f"  - Check specified path: {specific_mkfs_ubifs_path}\n"
+            error_msg += "  - Check system path: /usr/sbin or /usr/bin or /usr/local/bin\n"
+            error_msg += "Please install it, e.g., with: sudo apt-get install mtd-utils "
+            error_msg += "or provide a valid path using the -u option."
+            print(error_msg)
+            sys.exit(1)
 
     mkfs_ubifs_version = get_mkfs_ubifs_version(mkfs_ubifs_cmd)
     if mkfs_ubifs_version:

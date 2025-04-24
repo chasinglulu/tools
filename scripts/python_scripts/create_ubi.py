@@ -78,16 +78,31 @@ def create_ubi_image(options):
             ubinize (str, optional): Path to the ubinize executable directory. Defaults to None.
     """
 
-    ubinize_cmd = os.path.join(options.get("ubinize", ""), "ubinize") if options.get("ubinize") else "ubinize"
+    ubinize_cmd = None
+    specific_ubinize_path = options.get("ubinize")
 
-    if not check_command_exists(ubinize_cmd):
-        if options.get("ubinize"):
-            print(f"Error: {ubinize_cmd} command not found.")
-            print(f"Please provide the correct path. Example: {os.path.dirname(options['ubinize'])}/ubinize")
+    if specific_ubinize_path:
+        potential_cmd = os.path.join(specific_ubinize_path, "ubinize")
+        if check_command_exists(potential_cmd):
+            ubinize_cmd = potential_cmd
+            print(f"Using '{specific_ubinize_path}/ubinize'")
         else:
-            print(f"Error: {ubinize_cmd} command not found.")
-            print("Please install it, e.g., with: sudo apt-get install mtd-utils")
-        sys.exit(1)
+            print(f"Warning: ubinize not found at path: {specific_ubinize_path}. Trying system path.")
+
+    if ubinize_cmd is None:
+        default_cmd = "ubinize"
+        if check_command_exists(default_cmd):
+            ubinize_cmd = default_cmd
+            print(f"Using system ubinize")
+        else:
+            error_msg = f"Error: {RED}'ubinize' command not found.{RESET}\n"
+            if specific_ubinize_path:
+                error_msg += f"  - Check specified path: {specific_ubinize_path}\n"
+            error_msg += "  - Check system path: /usr/sbin or /usr/bin or /usr/local/bin\n"
+            error_msg += "Please install it, e.g., with: sudo apt-get install mtd-utils "
+            error_msg += "or provide a valid path using the -b option."
+            print(error_msg)
+            sys.exit(1)
 
     ubinize_version = get_ubinize_version(ubinize_cmd)
     if ubinize_version:
