@@ -142,8 +142,8 @@ def main():
     parser = argparse.ArgumentParser(description="Create a UBI image using ubinize.")
     parser.add_argument("-o", "--output", required=True, dest="output_image", help="The output UBI image filename")
     parser.add_argument("-c", "--cfg", required=True, dest="config_file", help="UBI configuration file")
-    parser.add_argument("-p", "--peb-size", required=True, dest="peb_size", help="Physical erase block size in bytes (e.g., 131072)")
-    parser.add_argument("-m", "--min-io-size", required=True, dest="min_io_size", help="Minimum I/O unit size in bytes (e.g., 2048)")
+    parser.add_argument("-p", "--peb-size", required=True, dest="peb_size", help="Physical erase block size in bytes (e.g., 131072 or 0x20000)")
+    parser.add_argument("-m", "--min-io-size", required=True, dest="min_io_size", help="Minimum I/O unit size in bytes (e.g., 2048 or 0x800)")
     parser.add_argument("-s", "--sub-page-size", dest="sub_page_size", help="Sub-page size in bytes (optional)")
     parser.add_argument("-O", "--vid-hdr-offset", dest="vid_hdr_offset", help="VID header offset (optional)")
     parser.add_argument("-b", "--ubinize", dest="ubinize", help="Path to the ubinize executable directory (optional)")
@@ -155,12 +155,12 @@ def main():
         sys.exit(1)
 
     try:
-        int(args.peb_size)
-        int(args.min_io_size)
+        int(args.peb_size, 0)
+        int(args.min_io_size, 0)
         if args.sub_page_size:
-            int(args.sub_page_size)
+            int(args.sub_page_size, 0)
         if args.vid_hdr_offset:
-            int(args.vid_hdr_offset)
+            int(args.vid_hdr_offset, 0)
     except ValueError as e:
         print(f"Error: Invalid numeric value provided for size/offset argument: {e}")
         sys.exit(1)
