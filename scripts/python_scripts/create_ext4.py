@@ -1,10 +1,20 @@
 #!/usr/bin/env python3
+# -*- coding:utf-8 -*-
+#
+# SPDX-License-Identifier: GPL-2.0+
+#
+# Copyright (C) 2025, Charleye <wangkart@aliyun.com>
+#
+# Creates an ext4 filesystem image using mke2fs.
+#
 
 import argparse
 import subprocess
 import sys
 import os
 import re
+import tempfile
+import shutil
 
 # ANSI escape codes for colored output
 RED = "\033[91m"
@@ -46,9 +56,22 @@ def get_mke2fs_version(mke2fs_cmd):
     except Exception:
         return None
 
+def find_fakeroot():
+    """
+    Finds the system fakeroot executable.
+    """
+    system_fakeroot = shutil.which("fakeroot")
+    if system_fakeroot:
+        print(f"Using system fakeroot: {system_fakeroot}")
+        return system_fakeroot
+    else:
+        # If system fakeroot is not found, return None.
+        # The calling function will handle the error.
+        return None
+
 def create_ext4_image(options):
     """
-    Creates an ext4 image from a directory.
+    Creates an ext4 image from a directory using fakeroot.
 
     Args:
         options (dict): A dictionary containing the following keys:
@@ -96,27 +119,75 @@ def create_ext4_image(options):
               f"       If the ext4 image creation fails, please check if the size\n"
               f"       specified in partitions.json is too small.{RESET}")
 
-    mkfs_command_base = [mke2fs_cmd, "-F", "-N", "0", "-O", "64bit", "-d", options["source_dir"], "-m", "5", "-r", "1", "-t", "ext4"]
+    fakeroot_cmd = find_fakeroot()
+    if not fakeroot_cmd:
+        print(f"Error: {RED}'fakeroot' command not found in system PATH.{RESET}")
+        print("Please install fakeroot (e.g., sudo apt-get install fakeroot).")
+        sys.exit(1)
+
+    output_dir = os.path.dirname(options["output_image"])
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
+    mkfs_command_parts = [
+        f'"{mke2fs_cmd}"', "-F", "-N", "0", "-O", "64bit",
+        "-d", f'"{options["source_dir"]}"',
+        "-m", "5", "-r", "1", "-t", "ext4"
+    ]
 
     if options.get("volume_label"):
-        mkfs_command = [mke2fs_cmd, "-L", options["volume_label"]] + mkfs_command_base[1:] + [options["output_image"], options["size"]]
-    else:
-        mkfs_command = mkfs_command_base + [options["output_image"], options["size"]]
+        mkfs_command_parts += ["-L", f'"{options["volume_label"]}"']
 
-    print(f"Running command: {' '.join(mkfs_command)}")
+    # Append output image and size at the end
+    mkfs_command_parts += [f'"{options["output_image"]}"', f'"{options["size"]}"']
 
+    mkfs_command_str = ' '.join(mkfs_command_parts)
+
+    script_path = None
     try:
-        subprocess.run(mkfs_command, check=True)
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".sh", prefix="fakeroot_ext4_") as tmp_script:
+            script_path = tmp_script.name
+            tmp_script.write("#!/bin/bash\n")
+            tmp_script.write("set -e\n")
+            # Ensure correct ownership within fakeroot environment
+            tmp_script.write(f"chown -h -R 0:0 \"{options['source_dir']}\"\n")
+            tmp_script.write("echo 'Running mke2fs within fakeroot ...'\n")
+            tmp_script.write(mkfs_command_str + "\n")
+            tmp_script.write("echo 'mke2fs finished.'\n")
+
+        os.chmod(script_path, 0o755)
+
+        print(f"Executing fakeroot script: {script_path}")
+        fakeroot_env = os.environ.copy()
+        fakeroot_env['FAKEROOTDONTTRYCHOWN'] = '1'
+
+        fakeroot_process_cmd = [fakeroot_cmd, "--", script_path]
+        print(f"Running command: {' '.join(fakeroot_process_cmd)}")
+        subprocess.run(fakeroot_process_cmd, check=True, env=fakeroot_env)
+
         print(f"Successfully created ext4 image: {options['output_image']}")
+
     except subprocess.CalledProcessError as e:
-        print(f"Error creating ext4 image: {e}")
+        print(f"{RED}Error executing fakeroot script: {e}{RESET}")
+        # Print script content for debugging
+        if script_path and os.path.exists(script_path):
+            try:
+                with open(script_path, 'r') as f:
+                    print("--- Fakeroot Script Content ---")
+                    print(f.read())
+                    print("-----------------------------")
+            except Exception as read_err:
+                print(f"Could not read script content: {read_err}")
         sys.exit(1)
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        print(f"{RED}An unexpected error occurred: {e}{RESET}")
         sys.exit(1)
+    finally:
+        if script_path and os.path.exists(script_path):
+            os.remove(script_path)
 
 def main():
-    parser = argparse.ArgumentParser(description="Create an ext4 image from a directory.")
+    parser = argparse.ArgumentParser(description="Create an ext4 image from a directory using fakeroot.")
     parser.add_argument("-o", "--output", default="rootfs.ext4", dest="output_image", help="The output image filename (default: rootfs.ext4)")
     parser.add_argument("-s", "--size", default="20M", help="Size of the image (default: 20M)")
     parser.add_argument("-l", "--label", default="", dest="volume_label", help="Volume label")
@@ -128,6 +199,11 @@ def main():
     if not os.path.isdir(args.source_dir):
         print(f"Error: Source directory '{args.source_dir}' not found or is not a directory.")
         sys.exit(1)
+
+    args.source_dir = os.path.abspath(args.source_dir)
+    args.output_image = os.path.abspath(args.output_image)
+    if args.mke2fs and not os.path.isabs(args.mke2fs) and '/' in args.mke2fs:
+         args.mke2fs = os.path.abspath(args.mke2fs)
 
     options = vars(args)
     create_ext4_image(options)
