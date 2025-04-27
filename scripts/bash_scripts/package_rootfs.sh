@@ -245,7 +245,7 @@ mk_fakeroot_script() {
     if [ -f "$ROOTFS_FULL_DEVICES_TABLE" ]; then
         echo "$BUILD_DIR/tools/bin/makedevs -d $ROOTFS_FULL_DEVICES_TABLE $TARGET_DIR" >> "$FAKEROOT_SCRIPT"
     else
-        echo "Warning: $ROOTFS_FULL_DEVICES_TABLE not found, skipping makedevs." >> "$FAKEROOT_SCRIPT"
+        echo "echo 'Warning: $ROOTFS_FULL_DEVICES_TABLE not found, skipping makedevs.'" >> "$FAKEROOT_SCRIPT"
     fi
     echo "mkdir -p $TARGET_DIR/dev" >> "$FAKEROOT_SCRIPT"
     echo "mknod -m 0622 $TARGET_DIR/dev/console c 5 1" >> "$FAKEROOT_SCRIPT"
