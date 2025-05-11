@@ -1,14 +1,13 @@
-'''
-SPDX-License-Identifier: GPL-2.0+
+#!/usr/bin/env python3
+# -*- coding:utf-8 -*-
+#
+# SPDX-License-Identifier: GPL-2.0+
+#
+# Copyright (C) 2025, Charleye <wangkart@aliyun.com>
+#
+# Parses a JSON file to get the size of a specified partition.
+#
 
-This script parses a JSON file containing partition information and
-retrieves the size of a specified partition, converting it to appropriate
-units (GB, MB, KB, bytes) based on its size. It supports a debug mode for
-more verbose output.
-
-Copyright (C) 2025 Charleye <wangkart@aliyun.com>
-
-'''
 import json
 import argparse
 
@@ -86,6 +85,8 @@ if __name__ == "__main__":
     parser.add_argument("-f", "--json_file", help="Path to the JSON file", required=True)
     parser.add_argument("-p", "--partition_name", help="Name of the partition to query", required=True)
     parser.add_argument("-d", "--debug", action="store_true", help="Enable debug output")
+    parser.add_argument("-B", "--bytes-only", action="store_true", help="Output size in bytes only")
+    parser.add_argument("-K", "--kilobytes-only", action="store_true", help="Output size in kilobytes only")
 
     args = parser.parse_args()
 
@@ -95,22 +96,28 @@ if __name__ == "__main__":
         print(f"{args.partition_name} : 0")
         exit(0)
 
-    if size % (1024 * 1024 * 1024) == 0:
-        size_value = int(size / (1024 * 1024 * 1024))
-        unit = "G"
-        unit_long = "GB"
-    elif size % (1024 * 1024) == 0:
-        size_value = int(size / (1024 * 1024))
-        unit = "M"
-        unit_long = "MB"
-    elif size % 1024 == 0:
-        size_value = int(size / 1024)
-        unit = "K"
-        unit_long = "KB"
+    if args.bytes_only:
+        output = f"{args.partition_name} : {size}"
+    elif args.kilobytes_only:
+        size_kb = int(size / 1024)
+        output = f"{args.partition_name} : {size_kb}"
     else:
-        size_value = size
-        unit = ""
-        unit_long = "bytes"
+        if size % (1024 * 1024 * 1024) == 0:
+            size_value = int(size / (1024 * 1024 * 1024))
+            unit = "G"
+            unit_long = "GB"
+        elif size % (1024 * 1024) == 0:
+            size_value = int(size / (1024 * 1024))
+            unit = "M"
+            unit_long = "MB"
+        elif size % 1024 == 0:
+            size_value = int(size / 1024)
+            unit = "K"
+            unit_long = "KB"
+        else:
+            size_value = size
+            unit = ""
+            unit_long = "bytes"
 
-    output = f"{args.partition_name} : {size_value}{unit}" if not args.debug else f"{args.partition_name} : {size_value}{unit}"
+        output = f"{args.partition_name} : {size_value}{unit}" if not args.debug else f"{args.partition_name} : {size_value}{unit}"
     print(output)
