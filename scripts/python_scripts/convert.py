@@ -3,31 +3,8 @@
 # SPDX-License-Identifier: GPL-2.0+
 # Copyright (C) 2025, Charleye <wangkart@aliyun.com>
 #
-# This script converts a JSON partition layout to an XML configuration for flashing tools.
-# It supports command-line options for project details, FDL parameters, and secure boot settings.
+# converts a JSON partition layout to an XML configuration for flashing tools.
 #
-# Usage:
-#   python3 convert.py -n <project_name> -a <project_alias> -i <input_json> -o <output_xml> [-l <fdl_level>] [-eb <eip_base>] [-es <eip_size>] [-f1b <fdl1_base>] [-f1s <fdl1_size>] [-f2b <fdl2_base>] [-f2s <fdl2_size>] [-d] [-m] [-t <strategy>] [-s]
-#   python3 convert.py --name <project_name> --alias <project_alias> --input <input_json> --output <output_xml> [--fdl_level <fdl_level>] [--eip_base <eip_base>] [--eip_size <eip_size>] [--fdl1_base <fdl1_base>] [--fdl1_size <fdl1_size>] [--fdl2_base <fdl2_base>] [--fdl2_size <fdl2_size>] [--debug] [--mtdparts] [--strategy <strategy>] [--secureboot]
-#
-# Options:
-#   -n, --name          Project name (default: M57H)
-#   -a, --alias         Project alias (default: M57H)
-#   -i, --input         Input JSON file (default: partitions.json)
-#   -o, --output        Output XML file (default: output.xml)
-#   -l, --fdl_level     FDL level (default: 2, choices: [1, 2])
-#   -eb, --eip_base     EIP base address in hex (default: 0x0)
-#   -es, --eip_size     EIP size in hex (default: 0x0)
-#   -f1b, --fdl1_base   FDL1 base address in hex (default: 0x400)
-#   -f1s, --fdl1_size   FDL1 size in hex (default: 0x0)
-#   -f2b, --fdl2_base   FDL2 base address in hex (default: 0x50000000)
-#   -f2s, --fdl2_size   FDL2 size in hex (default: 0x0)
-#   -d, --debug         Enable debug output
-#   -m, --mtdparts      Enable mtdparts string conversion
-#   -t, --strategy      Partitions strategy (default: 1, choices: [0, 1])
-#   -s, --secureboot    Enable secure boot specific settings
-#
-# For any questions, please contact: wangkart@aliyun.com
 
 import json
 import xml.etree.ElementTree as ET
@@ -99,7 +76,7 @@ def handle_mtdparts(args, json_partitions, json_unit):
         if args.mtdparts_file:
             try:
                 with open(args.mtdparts_file, 'w') as f:
-                    f.write(mtdparts_str)
+                    f.write('PARTITION="' + mtdparts_str + '"\n')
                 print(f"MTD parts string written to: {args.mtdparts_file}")
             except Exception as e:
                 print(f"Error writing to {args.mtdparts_file}: {e}")
@@ -131,19 +108,19 @@ def parse_arguments():
     parser.add_argument('-a', '--alias', default=None, help='Project alias')
     parser.add_argument('-i', '--input', default='partitions.json', help='Input JSON file')
     parser.add_argument('-o', '--output', default='output.xml', help='Output XML file')
+    parser.add_argument('-mf', '--mtdparts_file', default=None, help='Output file for mtdparts string')
     parser.add_argument('-l', '--fdl_level', default='2', choices=['1', '2'], help='FDL level')
-    parser.add_argument('-eb', '--eip_base', default='0x0', type=str, help='EIP base address in hex')
+    parser.add_argument('-eb', '--eip_base', default='0x3EA000', type=str, help='EIP base address in hex')
     parser.add_argument('-es', '--eip_size', default='0x0', type=str, help='EIP size in hex')
-    parser.add_argument('-f1b', '--fdl1_base', default='0x400', type=str, help='FDL1 base address in hex')
+    parser.add_argument('-f1b', '--fdl1_base', default='0x200000', type=str, help='FDL1 base address in hex')
     parser.add_argument('-f1s', '--fdl1_size', default='0x0', type=str, help='FDL1 size in hex')
-    parser.add_argument('-f2b', '--fdl2_base', default='0x50000000', type=str, help='FDL2 base address in hex')
+    parser.add_argument('-f2b', '--fdl2_base', default='0x14000A00', type=str, help='FDL2 base address in hex')
     parser.add_argument('-f2s', '--fdl2_size', default='0x0', type=str, help='FDL2 size in hex')
     parser.add_argument('-d', '--debug', action='store_true', default=False, help='Enable debug output')
     parser.add_argument('-m', '--mtdparts', action='store_true', default=False, help='Enable mtdparts string conversion')
     parser.add_argument('-t', '--strategy', default='1', choices=['0', '1'], help='Partitions strategy')
     parser.add_argument('-s', '--secureboot', action='store_true', default=False, help='Include EIP image in ImgList')
     parser.add_argument('-v', '--version', default='1.0', help='Project version')
-    parser.add_argument('-mf', '--mtdparts_file', default=None, help='Output file for mtdparts string')
     args = parser.parse_args()
 
     # Validate input file
@@ -194,8 +171,8 @@ def load_and_validate_json(input_file):
     for partition in json_partitions:
         if 'flags' in partition:
             flags_value = partition['flags']
-            if flags_value not in ['no-image', 'not-selected']:
-                raise ValueError(f"Invalid value for 'flags' field: {flags_value}. Allowed values are 'no-image' and 'not-selected'.")
+            if flags_value not in ['no-image', 'selected']:
+                raise ValueError(f"Invalid value for 'flags' field: {flags_value}. Allowed values are 'no-image' and 'selected'.")
 
         if 'attrs' in partition:
             attrs_value = partition['attrs']
@@ -267,10 +244,24 @@ def generate_images(args, json_partitions):
     for partition in json_partitions:
         if partition['name'].lower() not in exclude_names:
             # Check if the partition has the 'flags' key and if it's set to 'no-image'
+            # Skip partitions marked as 'no-image'
             if 'flags' in partition and 'no-image' in partition['flags']:
-                continue  # Skip this partition
-            flag_value = "1" if 'flags' in partition and 'not-selected' in partition['flags'] else "3"
-            select_value = "0" if 'flags' in partition and 'not-selected' in partition['flags'] else "1"
+                continue
+
+            # Determine flag_value based on flags
+            # Default: requires file (0x01) -> 1
+            flag_value = "1"
+            if 'flags' in partition and 'selected' in partition['flags']:
+                 # If 'selected' flag is present, it requires file (0x01) and must be selected (0x02) -> 3
+                flag_value = "3"
+
+            # Determine select_value based on gui_select first
+            select_value = "1"
+            if 'gui_select' in partition:
+                gui_select_val = str(partition['gui_select']).lower()
+                if gui_select_val == '0' or gui_select_val == 'false':
+                    select_value = "0"
+
             images.append({
                 "flag": flag_value,
                 "name": partition['name'].upper(),
