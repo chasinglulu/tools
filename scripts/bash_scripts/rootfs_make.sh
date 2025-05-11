@@ -10,9 +10,10 @@
 # Exit on error
 set -e
 DEBUG_MODE=false
+SKIP_PKG_ADDITIONAL_FILES=false
 
 usage() {
-    echo "Usage: $0 -r <rootfs_archive> -p <platform> -t <fs_type> -s <partition_size> -o <output_dir> [-y <yaml_config>] [-u <mkfs.ubifs_path>] [-m <mke2fs_path>] [-b <ubinize_path>] [-d]"
+    echo "Usage: $0 -r <rootfs_archive> -p <platform> -t <fs_type> -s <partition_size> -o <output_dir> [-y <yaml_config>] [-u <mkfs.ubifs_path>] [-m <mke2fs_path>] [-b <ubinize_path>] [-d] [-S]"
     echo "  -r <rootfs_archive>: Path to the input rootfs archive (e.g., rootfs.cpio.gz)"
     echo "  -p <platform>: Specify the platform"
     echo "  -t <fs_type>: Filesystem type to create ('ubifs', 'ext4', or 'ubi')"
@@ -23,13 +24,14 @@ usage() {
     echo "  -m <mke2fs_path>: Path to the mke2fs executable directory (optional)"
     echo "  -b <ubinize_path>: Path to the ubinize executable directory (optional, for ubi type)"
     echo "  -d: Enable debug mode (set -x)"
+    echo "  -S: Skip copying additional files when calling package_rootfs.sh"
     echo "  -h: Show help message"
     exit 1
 }
 
 parse_args() {
     local missing_arg_error=false
-    while getopts "hr:p:t:s:y:o:u:m:b:d" opt; do
+    while getopts "hr:p:t:s:y:o:u:m:b:dS" opt; do
         case $opt in
             r) ROOTFS_ARCHIVE="$OPTARG" ;;
             p) PLATFORM="$OPTARG" ;;
@@ -41,6 +43,7 @@ parse_args() {
             m) MKE2FS_PATH="$OPTARG" ;;
             b) UBINIZE_PATH="$OPTARG" ;;
             d) DEBUG_MODE=true ;;
+            S) SKIP_PKG_ADDITIONAL_FILES=true ;;
             h) usage ;;
             \?) echo "Invalid option: -$OPTARG" >&2; usage ;;
         esac
@@ -132,6 +135,9 @@ unfold_rootfs() {
     local package_cmd_args=("$PACKAGE_ROOTFS_SCRIPT" -N -r "$ROOTFS_ARCHIVE" -p "$PLATFORM" -T "$PREPARED_ROOTFS_DIR")
     if [ "$DEBUG_MODE" = true ]; then
         package_cmd_args+=("-d")
+    fi
+    if [ "$SKIP_PKG_ADDITIONAL_FILES" = true ]; then
+        package_cmd_args+=("-S")
     fi
     bash "${package_cmd_args[@]}"
 
@@ -236,9 +242,6 @@ create_ubifs_image() {
     fi
     echo "Calculated LEB Size: $leb_size"
 
-    # Calculate max LEB count
-    # Formula: max_leb_cnt = floor(partition_size / leb_size)
-    # Subtract a few LEBs for UBIFS overhead (e.g., 4 for journal, VID header, EC header etc.)
     overhead_lebs=4
     max_lebs=$((PARTITION_SIZE_BYTES / leb_size - overhead_lebs))
     if [ $max_lebs -le 0 ]; then
@@ -339,6 +342,9 @@ main() {
     echo "FS Type: $FS_TYPE"
     echo "Partition Size: $PARTITION_SIZE_STR"
     echo "Output Dir: $OUTPUT_DIR"
+    if [ "$SKIP_PKG_ADDITIONAL_FILES" = true ]; then
+        echo "Skip package additional files: Yes"
+    fi
     if [[ "$FS_TYPE" == "ubifs" || "$FS_TYPE" == "ubi" ]]; then
         echo "YAML Config: $YAML_CONFIG"
     fi
