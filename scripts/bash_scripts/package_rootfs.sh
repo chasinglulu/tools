@@ -13,19 +13,21 @@ PLATFORM=""
 DO_PACKAGING=true
 DEBUG_MODE=false
 CUSTOM_TARGET_DIR=""
+SKIP_COPY_ADDITIONAL_FILES=false
 
 usage() {
-    echo "Usage: $0 [-hdN] -r <rootfs_archive> [-p <platform>] [-T <target_dir>]"
+    echo "Usage: $0 [-hdN] -r <rootfs_archive> [-p <platform>] [-T <target_dir>] [-S]"
     echo "  -h: Show help message"
     echo "  -d: Enable debug mode (set -x)"
     echo "  -r <rootfs_archive>: Specify the path to the input rootfs archive (e.g., rootfs.cpio, rootfs.cpio.gz, rootfs.cpio.lz4)"
     echo "  -p <platform>: Specify the platform (optional, used for default output paths)"
     echo "  -T <target_dir>: Specify the target directory path (optional, defaults to <rootfs_dir>/target)"
     echo "  -N: No packaging. Only extract, copy files, and run fakeroot script up to device node creation. Skip final CPIO creation and compression."
+    echo "  -S: Skip copying additional files (msp, ko, init scripts)."
     exit 1
 }
 
-while getopts "hdr:p:T:N" opt; do
+while getopts "hdr:p:T:NS" opt; do
     case $opt in
         r)
             ROOTFS_ARCHIVE="$OPTARG"
@@ -38,6 +40,9 @@ while getopts "hdr:p:T:N" opt; do
             ;;
         N)
             DO_PACKAGING=false
+            ;;
+        S)
+            SKIP_COPY_ADDITIONAL_FILES=true
             ;;
         d)
             DEBUG_MODE=true
@@ -228,7 +233,11 @@ mk_rootfs() {
     echo "Cleaning up temporary cpio file..."
     rm "$temp_cpio"
 
-    copy_additional_files
+    if [ "$SKIP_COPY_ADDITIONAL_FILES" = false ]; then
+        copy_additional_files
+    else
+        echo "Skipping copy_additional_files as requested."
+    fi
 }
 
 mk_fakeroot_script() {
