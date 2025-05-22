@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: GPL-2.0+
+#
+# Copyright (C) 2025 Charleye <wangkart@aliyun.com>
+#
+
+CROSS_COMPILE ?=
+CC = $(CROSS_COMPILE)gcc
+CFLAGS = -Wall -Wextra -g -O2
+
+TARGET_UART_TOOL = uart_tool
+SRC_UART_TOOL = uart_tool.c
+OBJ_UART_TOOL = $(SRC_UART_TOOL:.c=.o)
+LDFLAGS_UART_TOOL = -lpthread
+
+TARGET_STRING_GENERATOR = string_generator
+SRC_STRING_GENERATOR = string_generator.c
+OBJ_STRING_GENERATOR = $(SRC_STRING_GENERATOR:.c=.o)
+LDFLAGS_STRING_GENERATOR =
+all: $(TARGET_UART_TOOL) $(TARGET_STRING_GENERATOR)
+
+$(TARGET_UART_TOOL): $(OBJ_UART_TOOL)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS_UART_TOOL)
+
+$(TARGET_STRING_GENERATOR): $(OBJ_STRING_GENERATOR)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS_STRING_GENERATOR)
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+clean:
+	rm -f $(TARGET_UART_TOOL) $(OBJ_UART_TOOL)
+	rm -f $(TARGET_STRING_GENERATOR) $(OBJ_STRING_GENERATOR)
+
+.PHONY: all clean
