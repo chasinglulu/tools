@@ -1,0 +1,91 @@
+[
+	{
+		"partitions": [
+			{
+				"_comment": "dummy partition, used for showing main domain bootmode",
+				"name": "nand",
+				"size": "0"
+			},
+			{
+				"name": "sbl_a",
+				"size": "768",
+				"flags": "no-image"
+			},
+			{
+				"name": "sbl_b",
+				"size": "768",
+				"flags": "no-image"
+			},
+			{
+				"name": "metadata",
+				"size": "768",
+				"flags": "no-image"
+			},
+			{
+				"name": "metadata_bak",
+				"size": "768",
+				"flags": "no-image"
+			},
+			{
+				"name": "spl_a",
+				"size": "768"
+			},
+			{
+				"name": "spl_b",
+				"size": "768"
+			},
+			{
+				"name": "misc",
+				"size": "768",
+				"flags": "no-image"
+			},
+			{
+				"name": "misc_bak",
+				"size": "768",
+				"flags": "no-image"
+			},
+			{
+				"name": "ubootenv",
+				"size": "768",
+				"flags": "no-image"
+			},
+			{
+				"name": "ubootenv_bak",
+				"size": "768",
+				"flags": "no-image"
+			},
+			{
+				"name": "uboot_a",
+				"size": "2048"
+			},
+			{
+				"name": "uboot_b",
+				"size": "2048",
+				"flags": "no-image"
+			},
+			{
+				"name": "kernel_a",
+				"size": "51200",
+				"flags": "no-image"
+			},
+			{
+				"name": "kernel_b",
+				"size": "51200",
+				"flags": "no-image"
+			},
+			{
+				"name": "rootfs_a",
+				"size": "102400",
+				"flags": "no-image"
+			},
+			{
+				"name": "rootfs_b",
+				"size": "102400",
+				"flags": "no-image"
+			}
+		]
+	},
+	{
+		"unit": "1K"
+	}
+]
