@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-
-# -----------------------------------------------------------------------------
-# This script is used to generate AXP files for different projects.
-# It parses command line arguments, sets up paths, and generates AXP parameters.
-#
-# Copyright (C) 2025 Charleye <wangkart@aliyun.com>
 #
 # SPDX-License-Identifier: GPL-2.0+
-# -----------------------------------------------------------------------------
+#
+# Copyright (C) 2025 Charleye <wangxinlu@aliyun.com>
+#
+# This script generates AXP files for different projects.
+#
 
 set -e
 
 # Parse command line arguments
 parse_arguments() {
-    while getopts "abghl:n:o:s:tuv:x" opt; do
+    while getopts "abcdghl:n:os:tuv:x" opt; do
         case "$opt" in
             a) SUPPORT_AB=TRUE ;;
             b) SECURE_BOOT=TRUE ;;
+            c) ENABLE_CIPHER=TRUE ;;
+            d) ROOTFS_DMVERITY=TRUE ;;
             g) SUPPORT_GZIPD=TRUE ;;
             l) LIBC_NAME=$OPTARG ;;
             n) PLATFORM=$OPTARG ;;
@@ -42,6 +42,8 @@ parse_arguments() {
     debug "  LIBC_NAME=$LIBC_NAME"
     debug "  SECURE_BOOT=$SECURE_BOOT"
     debug "  SUPPORT_ATF=$SUPPORT_ATF"
+    debug "  ENABLE_CIPHER=$ENABLE_CIPHER"
+    debug "  ROOTFS_DMVERITY=$ROOTFS_DMVERITY"
 }
 
 # Print usage information
@@ -50,11 +52,13 @@ print_usage() {
     echo "Options:"
     echo "  -a  Enable AB partition"
     echo "  -b  Enable secure boot"
+    echo "  -c  Enable image cipher"
+    echo "  -d  Enable rootfs dm-verity"
     echo "  -g  Support GZIP"
     echo "  -h  Show this help message"
     echo "  -l  Specify libc name (e.g. glibc)"
     echo "  -o  Support OPTEE"
-    echo "  -n  Platform name (e.g. axera_fpga)"
+    echo "  -n  Project name (e.g. laguna_nand)"
     echo "  -s  Sensor Model"
     echo "  -t  Support ATF"
     echo "  -u  Build Ubuntu AXP"
@@ -100,6 +104,17 @@ generate_axp_filename() {
     debug "AXP_NAME=$AXP_NAME"
 }
 
+generate_sdcard_filename() {
+	debug "Generating SDcard filename..."
+	if [ -z "$SENSOR_MODEL" ]; then
+		SDIMG_NAME=${PLATFORM}_sdcard_${VERSION_EXT}.zip
+	else
+		SENSOR_MODEL=$(echo $SENSOR_MODEL | tr ' ' '_')
+		SDIMG_NAME=${PLATFORM}_sdcard_${SENSOR_MODEL}_${VERSION_EXT}.zip
+	fi
+	debug "SDIMG_NAME=$SDIMG_NAME"
+}
+
 # Initialize paths
 initialize_paths() {
     debug "Initializing paths..."
@@ -110,8 +125,10 @@ initialize_paths() {
     SAFE_IMG_PATH=$OUTPUT_PATH/$PROJECT/images/SafetyIsland
     ENV_PATH=$OUTPUT_PATH/$PROJECT/images/ota_env.txt
     AXP_PATH=$OUTPUT_PATH/$AXP_NAME
+    SDIMG_PATH=$OUTPUT_PATH/$SDIMG_NAME
     GEN_AXP_TOOL=$HOME_PATH/build/scripts/create_axp.py
     GEN_XML_TOOL=$HOME_PATH/build/scripts/convert.py
+    GEN_SDIMG_TOOL=$HOME_PATH/build/scripts/create_sdcard_image.py
     JSON_PATH=$HOME_PATH/build/out/$PROJECT/images/$PROJECT.json
     PAC_XML_PATH=$HOME_PATH/build/out/$PROJECT/images/$PROJECT.xml
     if [ "$BUILD_UBUNTU_AXP" = "TRUE" ] ; then
@@ -124,8 +141,10 @@ initialize_paths() {
     debug "  OUTPUT_PATH=$OUTPUT_PATH"
     debug "  IMG_PATH=$IMG_PATH"
     debug "  AXP_PATH=$AXP_PATH"
+    debug "  SDIMG_PATH=$SDIMG_PATH"
     debug "  GEN_AXP_TOOL=$GEN_AXP_TOOL"
     debug "  GEN_XML_TOOL=$GEN_XML_TOOL"
+    debug "  GEN_SDIMG_TOOL=$GEN_SDIMG_TOOL"
     debug "  JSON_PATH=$JSON_PATH"
     debug "  PAC_XML_PATH=$PAC_XML_PATH"
     debug "  PROJECT_MAK=$PROJECT_MAK"
@@ -166,6 +185,9 @@ initialize_image_paths() {
     SPL_PATH=$IMG_PATH/u-boot-spl_signed.img
     SPL_A_PATH=$IMG_PATH/u-boot-spl_signed.img
     SPL_B_PATH=$IMG_PATH/u-boot-spl_signed.img
+    ROOTFS_PATH=$IMG_PATH/rootfs.img
+    ROOTFS_A_PATH=$IMG_PATH/rootfs.img
+    ROOTFS_B_PATH=$IMG_PATH/rootfs.img
 
     if [ "$SECURE_BOOT" = "TRUE" ]; then
         cp $HOME_PATH/build/scripts/imgsign/eip130_fw.bin $IMG_PATH/eip_m57h.img
@@ -178,6 +200,28 @@ initialize_image_paths() {
         KERNEL_PATH=$IMG_PATH/kernel_signed.img
         KERNEL_A_PATH=$IMG_PATH/kernel_signed.img
         KERNEL_B_PATH=$IMG_PATH/kernel_signed.img
+        if [ "$ROOTFS_DMVERITY" = "TRUE" ]; then
+            ROOTFS_PATH=$IMG_PATH/rootfs_signed.img
+            ROOTFS_A_PATH=$IMG_PATH/rootfs_signed.img
+            ROOTFS_B_PATH=$IMG_PATH/rootfs_signed.img
+        fi
+        if [ "$ENABLE_CIPHER" = "TRUE" ]; then
+            SBL_PATH=$SAFE_IMG_PATH/sbl_enc_signed.img
+            SBL_A_PATH=$SAFE_IMG_PATH/sbl_enc_signed.img
+            SBL_B_PATH=$SAFE_IMG_PATH/sbl_enc_signed.img
+            RTOS_PATH=$SAFE_IMG_PATH/Mcal_Demo_enc_signed.img
+            RTOS_A_PATH=$SAFE_IMG_PATH/Mcal_Demo_enc_signed.img
+            RTOS_B_PATH=$SAFE_IMG_PATH/Mcal_Demo_enc_signed.img
+            SPL_PATH=$IMG_PATH/u-boot-spl_enc_signed.img
+            SPL_A_PATH=$IMG_PATH/u-boot-spl_enc_signed.img
+            SPL_B_PATH=$IMG_PATH/u-boot-spl_enc_signed.img
+            UBOOT_PATH=$IMG_PATH/u-boot_enc_signed.img
+            UBOOT_A_PATH=$IMG_PATH/u-boot_enc_signed.img
+            UBOOT_B_PATH=$IMG_PATH/u-boot_enc_signed.img
+            KERNEL_PATH=$IMG_PATH/kernel_enc_signed.img
+            KERNEL_A_PATH=$IMG_PATH/kernel_enc_signed.img
+            KERNEL_B_PATH=$IMG_PATH/kernel_enc_signed.img
+        fi
     else
         FDL2_PATH=$IMG_PATH/fdl2.img
         UBOOT_PATH=$IMG_PATH/u-boot.img
@@ -198,6 +242,11 @@ initialize_image_paths() {
             ATF_PATH=$IMG_PATH/bl31_signed.img
             ATF_A_PATH=$IMG_PATH/bl31_signed.img
             ATF_B_PATH=$IMG_PATH/bl31_signed.img
+            if [ "$ENABLE_CIPHER" = "TRUE" ]; then
+                ATF_PATH=$IMG_PATH/bl31_enc_signed.img
+                ATF_A_PATH=$IMG_PATH/bl31_enc_signed.img
+                ATF_B_PATH=$IMG_PATH/bl31_enc_signed.img
+            fi
         else
             ATF_PATH=$IMG_PATH/bl31.img
             ATF_A_PATH=$IMG_PATH/bl31.img
@@ -209,6 +258,11 @@ initialize_image_paths() {
             OPTEE_PATH=$IMG_PATH/optee_signed.img
             OPTEE_A_PATH=$IMG_PATH/optee_signed.img
             OPTEE_B_PATH=$IMG_PATH/optee_signed.img
+            if [ "$ENABLE_CIPHER" = "TRUE" ]; then
+                OPTEE_PATH=$IMG_PATH/optee_enc_signed.img
+                OPTEE_A_PATH=$IMG_PATH/optee_enc_signed.img
+                OPTEE_B_PATH=$IMG_PATH/optee_enc_signed.img
+            fi
         else
             OPTEE_PATH=$IMG_PATH/optee.img
             OPTEE_A_PATH=$IMG_PATH/optee.img
@@ -216,12 +270,12 @@ initialize_image_paths() {
         fi
     fi
 
-    ROOTFS_PATH=$IMG_PATH/rootfs_sparse_ext4.img
-    PARAM_PATH=$IMG_PATH/param_sparse.ext4
-    SOC_PATH=$IMG_PATH/soc_sparse_ext4.img
-    OPT_PATH=$IMG_PATH/opt_sparse_ext4.img
-    CUSTOMER_PATH=$IMG_PATH/customer.img
-    MODEL_PATH=$IMG_PATH/model.img
+    #ROOTFS_PATH=$IMG_PATH/rootfs_sparse_ext4.img
+    #PARAM_PATH=$IMG_PATH/param_sparse.ext4
+    #SOC_PATH=$IMG_PATH/soc_sparse_ext4.img
+    #OPT_PATH=$IMG_PATH/opt_sparse_ext4.img
+    #CUSTOMER_PATH=$IMG_PATH/customer.img
+    #MODEL_PATH=$IMG_PATH/model.img
     if [ "$BUILD_UBUNTU_AXP" = "TRUE" ]; then
         UBUNTU_ROOTFS_PATH=$IMG_PATH/ubuntu_rootfs_sparse_ext4.img
     fi
@@ -230,6 +284,8 @@ initialize_image_paths() {
     debug "  EIP_PATH=$EIP_PATH"
     debug "  FDL1_PATH=$FDL1_PATH"
     debug "  FDL2_PATH=$FDL2_PATH"
+    debug "  SBL_PATH=$SBL_PATH"
+    debug "  RTOS_PATH=$RTOS_PATH"
     debug "  SPL_PATH=$SPL_PATH"
     debug "  UBOOT_PATH=$UBOOT_PATH"
     debug "  KERNEL_PATH=$KERNEL_PATH"
@@ -259,27 +315,44 @@ initialize_image_paths() {
     debug "Image paths initialized."
 }
 
+initialize_sdcard_specific_paths() {
+	debug "Initializing SDCard image paths..."
+	BOOT_PATH=$SAFE_IMG_PATH/boot.bin
+	FDL_PARTITION_PATH=$IMG_PATH/fdl_partition.img
+
+	debug "SDCard Image paths initialized:"
+	debug "  BOOT_PATH=$BOOT_PATH"
+	debug "  FDL_PARTITION_PATH=$FDL_PARTITION_PATH"
+
+	# Check if files exist
+	if [ ! -f "$BOOT_PATH" ]; then
+		echo "Error: BOOT_PATH file not found: $BOOT_PATH"
+		exit 1
+	fi
+	if [ ! -f "$FDL_PARTITION_PATH" ]; then
+		echo "Error: FDL_PARTITION_PATH file not found: $FDL_PARTITION_PATH"
+		exit 1
+	fi
+
+	debug "SDCard image specific paths initialization completed."
+}
+
 initialize_project_specific_paths() {
     debug "Initializing project-specific paths..."
     if [[ "$PROJECT" =~ "m57h_nand" ]] ; then
         PARAM_PATH=$IMG_PATH/param.ubi
-        ROOTFS_PATH=$IMG_PATH/rootfs_soc_opt.ubi
-    elif [[ "$PROJECT" =~ "m57h_nor" ]] ; then
-        ROOTFS_PATH=$IMG_PATH/rootfs.img
-        OPT_PATH=$IMG_PATH/opt.img
-    elif [[ "$PROJECT" =~ "m57h_hyper" ]] ;then
-        :
-    elif [[ "$PROJECT" =~ "m57h_emmc" ]] ;then
-        :
-    elif [[ "$PROJECT" =~ "fpga" ]] ;then
-        :
-    elif [[ "$PROJECT" =~ "demo_nor_nand" ]] ;then
-        :
-    elif [[ "$PROJECT" =~ "evb" ]] ; then
-        :
+    elif [[ "$PROJECT" =~ "slt" ]] ;then
+        RTOS_PATH=$SAFE_IMG_PATH/BareDemo_signed.img
+        RTOS_A_PATH=$SAFE_IMG_PATH/BareDemo_signed.img
+        RTOS_B_PATH=$SAFE_IMG_PATH/BareDemo_signed.img
+        if [ "$ENABLE_CIPHER" = "TRUE" ]; then
+            RTOS_PATH=$SAFE_IMG_PATH/BareDemo_enc_signed.img
+            RTOS_A_PATH=$SAFE_IMG_PATH/BareDemo_enc_signed.img
+            RTOS_B_PATH=$SAFE_IMG_PATH/BareDemo_enc_signed.img
+        fi
     else
-        echo "Error: Unsupported project name: $PROJECT"
-        exit 1
+        debug "Warning: Unsupported project name: $PROJECT specific path initialize"
+        return
     fi
     debug "Project-specific paths initialized."
 }
@@ -307,6 +380,60 @@ generate_axp_parameters() {
     debug "AXP_PARM=$AXP_PARM"
 }
 
+create_sdcard_image() {
+    debug "Creating FDL SDCard image ..."
+
+    debug "Original Partition List: $IMAGE_NAMES"
+
+    local sd_img_arr=()
+    local orig_img_arr=($IMAGE_NAMES)
+
+    for item in "${orig_img_arr[@]}"; do
+        if [[ "$item" != "FDL1" ]]; then
+            sd_img_arr+=("$item")
+        fi
+    done
+    sd_img_arr+=("BOOT" "FDL_PARTITION")
+
+
+    local sd_img_str=$(IFS=" "; echo "${sd_img_arr[*]}")
+    debug "Effective Partition List: $sd_img_str"
+
+    debug "Generating SDCard image parameters..."
+    SDIMG_PARM=""
+
+    for image_label in "${sd_img_arr[@]}"; do
+        local image_path_var="${image_label}_PATH"
+        if [ -n "${!image_path_var}" ] && [ -f "${!image_path_var}" ]; then
+            debug "Found path for $image_label: ${!image_path_var}"
+            SDIMG_PARM+=" $image_label=${!image_path_var}"
+        else
+            echo "Error: No path found for image $image_label"
+            exit 1
+        fi
+    done
+
+    SDIMG_PARM="${SDIMG_PARM# }"
+    debug "SDIMG_PARM=$SDIMG_PARM"
+
+    SDIMG_GEN_CMD="python3 $GEN_SDIMG_TOOL -o $SDIMG_PATH -P $SDIMG_PARM"
+    if [ "$DEBUG" = "TRUE" ]; then
+        SDIMG_GEN_CMD+=" -d -v"
+        debug "SDIMG_GEN_CMD: $SDIMG_GEN_CMD"
+    fi
+
+    # Execute SDCard Image generation command
+    $SDIMG_GEN_CMD
+    SDIMG_RETURN_CODE=$?
+
+    if [ $SDIMG_RETURN_CODE -ne 0 ]; then
+        echo "Error: SDCard image generation failed with code $SDIMG_RETURN_CODE" >&2
+        exit 1
+    fi
+
+    debug "SDCard image generation finished."
+}
+
 # Main function
 main() {
     if [ $# -eq 0 ]; then
@@ -327,9 +454,11 @@ main() {
     fi
 
     generate_axp_filename
+    generate_sdcard_filename
     initialize_paths
     initialize_image_paths
     initialize_project_specific_paths
+    initialize_sdcard_specific_paths
 
     debug "Chip SoC Name: $CHIP_NAME"
 
@@ -402,6 +531,9 @@ main() {
     fi
     echo "AXP_PATH=\"$AXP_PATH\"" >> $ENV_PATH
     echo "VERSION=\"$VERSION\"" >> $ENV_PATH
+
+    # Execute SD card image creation if applicable
+    create_sdcard_image
 }
 
 main "$@"
