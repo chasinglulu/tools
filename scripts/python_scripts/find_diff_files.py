@@ -10,6 +10,7 @@
 
 import os
 import argparse
+from collections import defaultdict
 
 def get_relative_file_paths(directory_path):
     """
@@ -26,7 +27,7 @@ def get_relative_file_paths(directory_path):
             relative_paths.add(relative_path)
     return relative_paths
 
-def compare_directories(source_dir_path, reference_dir_path, show_common=False):
+def compare_directories(source_dir_path, reference_dir_path, show_common=False, debug=False):
     """
     Finds and prints files that are in source_dir_path but not in reference_dir_path,
     based on their filenames.
@@ -45,6 +46,12 @@ def compare_directories(source_dir_path, reference_dir_path, show_common=False):
     files_in_source = get_relative_file_paths(source_dir_path)
     files_in_reference = get_relative_file_paths(reference_dir_path)
 
+    if debug:
+        print("\n--- Debug: Files in Source (Relative Paths) ---")
+        for r_path in sorted(list(files_in_source)):
+            print(f"  - {r_path}")
+        print("--- End Debug: Files in Source (Relative Paths) ---\n")
+
     # Extract filenames from the paths
     filenames_in_source = {os.path.basename(path) for path in files_in_source}
     filenames_in_reference = {os.path.basename(path) for path in files_in_reference}
@@ -60,14 +67,22 @@ def compare_directories(source_dir_path, reference_dir_path, show_common=False):
         print(f"No files found in '{os.path.basename(source_dir_path.rstrip('/'))}' that are not also in '{os.path.basename(reference_dir_path.rstrip('/'))}' (based on filenames).")
     else:
         print(f"Files present in '{os.path.basename(source_dir_path.rstrip('/'))}' but not in '{os.path.basename(reference_dir_path.rstrip('/'))}':")
-        # Sort for consistent output
-        for filename in sorted(list(unique_to_source)):
-            # Find the full path for the filename in source
-            full_path = next((path for path in files_in_source if os.path.basename(path) == filename), None)
-            if full_path:
-                print(f"  - {full_path}")
+        
+        # Collect all full relative paths of unique files in source
+        unique_full_paths_in_source = []
+        for filename_basename in sorted(list(unique_to_source)):
+            # Find the full relative path for the filename in source
+            full_relative_path = next((path for path in files_in_source if os.path.basename(path) == filename_basename), None)
+            if full_relative_path:
+                unique_full_paths_in_source.append(full_relative_path)
             else:
-                print(f"  - {filename} (Path not found)")
+                # Should not happen if logic is correct, but as a fallback
+                unique_full_paths_in_source.append(filename_basename + " (Path not found)")
+
+        # Print each unique file with its full relative path, sorted
+        for full_path in sorted(unique_full_paths_in_source):
+            print(f"  - {full_path}")
+
 
         if show_common:
             print("\nCommon files (present in both directories):")
@@ -102,10 +117,13 @@ def main():
                         action="store_true",
                         dest="show_common",
                         help="Show common files in the output.")
+    parser.add_argument("-D", "--debug",
+                        action="store_true",
+                        help="Enable debug mode to print intermediate information.")
     
     args = parser.parse_args()
     
-    compare_directories(args.source_dir, args.reference_dir, args.show_common)
+    compare_directories(args.source_dir, args.reference_dir, args.show_common, args.debug)
 
 if __name__ == "__main__":
     main()
