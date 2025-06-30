@@ -9,10 +9,10 @@ CFLAGS := -Wall -Wextra -g
 INCLUDES := -I.
 
 # Source and object files
-SRCS_COMMON := log.c device_io.c crc32.c
+SRCS_COMMON := log.c device_io.c crc32.c bootloader_message.c
 OBJS_COMMON := $(SRCS_COMMON:.c=.o)
 
-ABC_SRCS := abc_tool.c
+ABC_SRCS := abc_tool.c board_abc.c
 BCB_SRCS := bcb_tool.c
 
 ABC_OBJS := $(ABC_SRCS:.c=.o) $(OBJS_COMMON)

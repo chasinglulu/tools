@@ -109,7 +109,13 @@ struct bootloader_message_ab {
     char update_channel[128];
 
     // Round up the entire struct to 4096-byte.
-    char reserved[1888];
+    union {
+        char reserved[1888];
+        struct {
+            uint8_t flags;
+            uint32_t crc32_le;
+        } __attribute__((packed));
+    };
 };
 
 /**

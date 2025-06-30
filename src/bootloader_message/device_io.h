@@ -13,6 +13,7 @@
 #include <stdbool.h>
 #include <linux/fs.h>
 #include <mtd/mtd-user.h>
+#include "bootloader_message.h"
 
 #define min_t(type, x, y) ({              \
 	type __min1 = (x);                    \
@@ -37,5 +38,9 @@ int get_blk_dev_info(int fd, uint64_t *devsz, uint32_t *blksz);
 
 ssize_t dev_read(int fd, loff_t offset, size_t len, void *dst);
 ssize_t dev_write(int fd, loff_t offset, size_t len, const void *src);
+
+int bootloader_message_ab_load(int fd1, int fd2, loff_t offset, struct bootloader_message_ab *buffer);
+int bootloader_message_ab_store(int fd1, int fd2, loff_t offset,
+                                struct bootloader_message_ab *buffer, bool sync);
 
 #endif // DEVICE_IO_H

@@ -22,15 +22,24 @@
 #define BOOTLOADER_CONTROL_MAGIC 0x42414342
 #define BOOTLOADER_CONTROL_VERSION 1
 
+/*
+ * Identifiers for the AB slot marking.
+ */
+enum ab_slot_mark {
+	AB_MARK_SUCCESSFUL,
+	AB_MARK_UNBOOTABLE,
+	AB_MARK_ACTIVE
+};
+
 typedef enum {
-	GET_NUMBER_SLOTS,
-	GET_CURRENT_SLOT,
-	MARK_BOOT_SUCCESSFUL,
-	SET_ACTIVE_BOOT_SLOT,
-	SET_SLOT_AS_UNBOOTABLE,
-	IS_SLOT_BOOTABLE,
-	IS_SLOT_MARKED_SUCCESSFUL,
+	GET_NUMBER,
+	GET_CURRENT,
 	GET_SUFFIX,
+	MARK_BOOT_SUCCESSFUL,
+	MARK_BOOT_ACTIVE,
+	MARK_BOOT_UNBOOTABLE,
+	IS_BOOTABLE,
+	IS_SUCCESSFUL,
 	DUMP_SLOT_INFO,
 	GEN_DEFAULT,
 
@@ -59,5 +68,8 @@ typedef struct {
 #define OPT_X BIT(7)
 #define OPT_P BIT(8)
 #define OPT_G BIT(9)
+
+int abc_board_setup(enum ab_slot_mark type, int slot);
+bool abc_board_exists(void);
 
 #endif

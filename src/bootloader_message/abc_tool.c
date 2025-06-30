@@ -34,11 +34,13 @@
 
 static unsigned long options_specified = 0;
 static action_list_t action_list = { 0 };
+static struct bootloader_message_ab bl_msg_ab = { 0 };
 static struct bootloader_control abc_metadata = { 0 };
 static bool metadata_loaded = false;
 static bool metadata_changed = false;
-static int abc_fd = -1;
 static uint32_t initial_checksum;
+static bool allow_direct = false;
+static bool has_board_abc = false;
 
 /**
  * @brief Store A/B metadata to the device.
@@ -52,15 +54,69 @@ static int abc_store(const char *device, struct bootloader_control *abc)
 {
 	off_t abc_offset = offsetof(struct bootloader_message_ab, slot_suffix);
 	ssize_t bytes_written;
+	int fd;
 
-	bytes_written = dev_write(abc_fd, abc_offset, sizeof(*abc), abc);
+	if (!device || !abc) {
+		log_error("Invalid device path or A/B metadata");
+		return -EINVAL;
+	}
+
+	fd = open(device, O_RDWR);
+	if (fd < 0) {
+		log_error("Could not open device %s: %s", device, strerror(errno));
+		return -errno;
+	}
+
+	bytes_written = dev_write(fd, abc_offset, sizeof(*abc), abc);
 	if (bytes_written != sizeof(*abc)) {
 		log_error("Could not write A/B metadata to '%s' (wrote %zd bytes)",
 		                device, bytes_written);
+		close(fd);
 		return (bytes_written < 0) ? (int)bytes_written : -EIO;
 	}
 
 	log_info("A/B metadata stored to '%s' successfully.", device);
+	close(fd);
+	return 0;
+}
+
+static int abc_store_redund(const char *device1, const char *device2,
+                            struct bootloader_control *abc, bool sync)
+{
+	int ret;
+	int fd1, fd2;
+
+	if (!device1 || !device2) {
+		log_error("Invalid device paths");
+		return -EINVAL;
+	}
+
+	fd1 = open(device1, O_RDWR);
+	if (fd1 < 0) {
+		log_error("Could not open device %s: %s", device1, strerror(errno));
+		return -errno;
+	}
+
+	fd2 = open(device2, O_RDWR);
+	if (fd2 < 0) {
+		log_error("Could not open device %s: %s", device2, strerror(errno));
+		close(fd1);
+		return -errno;
+	}
+
+	memcpy((void *)&bl_msg_ab + offsetof(struct bootloader_message_ab, slot_suffix),
+	                    abc, sizeof(*abc));
+	ret = bootloader_message_ab_store(fd1, fd2, 0, &bl_msg_ab, sync);
+	if (ret < 0) {
+		log_error("Failed to store AB-specific bootloader message: %s", strerror(-ret));
+		close(fd1);
+		close(fd2);
+		return ret;
+	}
+
+	close(fd1);
+	close(fd2);
+
 	return 0;
 }
 
@@ -108,18 +164,32 @@ static int abc_load(const char *device)
 {
 	ulong abc_offset = offsetof(struct bootloader_message_ab, slot_suffix);
 	struct stat device_stat;
+	int fd;
 	int bytes_read;
 	int ret = 0;
 
-	if (fstat(abc_fd, &device_stat) < 0) {
+	if (!device) {
+		log_error("Invalid device path");
+		return -EINVAL;
+	}
+
+	fd = open(device, O_RDWR);
+	if (fd < 0) {
+		log_error("Could not open device %s: %s", device, strerror(errno));
+		return -errno;
+	}
+
+	if (fstat(fd, &device_stat) < 0) {
 		log_error("Could not stat device %s: %s", device, strerror(errno));
+		close(fd);
 		return -errno;
 	}
 
 	// Read A/B metadata
-	bytes_read = dev_read(abc_fd, abc_offset, sizeof(abc_metadata), &abc_metadata);
+	bytes_read = dev_read(fd, abc_offset, sizeof(abc_metadata), &abc_metadata);
 	if (bytes_read != sizeof(abc_metadata)) {
 		log_error("Could not read A/B metadata from '%s'", device);
+		close(fd);
 		return -EIO;
 	}
 
@@ -131,6 +201,71 @@ static int abc_load(const char *device)
 
 	metadata_loaded = true;
 	initial_checksum = abc_metadata.crc32_le;
+
+	close(fd);
+	return 0;
+}
+
+static int abc_load_redund(const char *device1, const char *device2)
+{
+	struct bootloader_control abc = { 0 };
+	struct bootloader_message_ab *buffer;
+	loff_t offset;
+	int ret;
+	int fd1, fd2;
+
+	if (!device1 || !device2) {
+		log_error("Invalid device paths");
+		return -EINVAL;
+	}
+
+	buffer = malloc(sizeof(struct bootloader_message_ab));
+	if (!buffer) {
+		log_error("Out of memory for buffer");
+		return -ENOMEM;
+	}
+
+	fd1 = open(device1, O_RDWR);
+	if (fd1 < 0) {
+		log_error("Could not open device %s: %s", device1, strerror(errno));
+		return -errno;
+	}
+
+	fd2 = open(device2, O_RDWR);
+	if (fd2 < 0) {
+		log_error("Could not open device %s: %s", device2, strerror(errno));
+		close(fd1);
+		return -errno;
+	}
+
+	ret = bootloader_message_ab_load(fd1, fd2, 0, buffer);
+	if (ret < 0) {
+		log_error("Failed to load AB-specific bootloader message: %s", strerror(-ret));
+		free(buffer);
+		close(fd1);
+		close(fd2);
+		return ret;
+	}
+
+	offset = offsetof(struct bootloader_message_ab, slot_suffix);
+	memcpy(&abc, (void *)buffer + offset, sizeof(abc));
+	ret = abc_validate(&abc);
+	if (ret < 0) {
+		free(buffer);
+		close(fd1);
+		close(fd2);
+		log_error("Invaild A/B metadata within redundant device");
+		return ret;
+	}
+
+	memcpy(&bl_msg_ab, buffer, sizeof(bl_msg_ab));
+	memcpy(&abc_metadata, &abc, sizeof(abc_metadata));
+	metadata_loaded = true;
+	initial_checksum = abc_metadata.crc32_le;
+
+	free(buffer);
+	close(fd1);
+	close(fd2);
 
 	return 0;
 }
@@ -168,6 +303,21 @@ static int abc_default(struct bootloader_control *abc)
 	return 0;
 }
 
+static int abc_get_number(void)
+{
+	if (!metadata_loaded) {
+		log_error("%s: A/B metadata not loaded", __func__);
+		return -ENODATA;
+	}
+
+	if (abc_metadata.nb_slot < 2 || abc_metadata.nb_slot > MAX_SLOTS) {
+		log_error("Invalid number of slots: %d", abc_metadata.nb_slot);
+		return -EINVAL;
+	}
+
+	return abc_metadata.nb_slot;
+}
+
 /**
  * @brief Get the active slot.
  *
@@ -178,7 +328,7 @@ static int abc_get_active_slot(void)
 	int slot, i;
 
 	if (!metadata_loaded) {
-		log_error("A/B metadata not loaded");
+		log_error("%s: A/B metadata not loaded", __func__);
 		return -ENODATA;
 	}
 
@@ -234,9 +384,17 @@ static int abc_mark_successful(int slot)
 {
 	struct slot_metadata *slotp = &abc_metadata.slot_info[slot];
 
+	if (!metadata_loaded) {
+		log_error("%s: A/B metadata not loaded", __func__);
+		return -ENODATA;
+	}
+
 	slotp->successful_boot = 1;
 	slotp->tries_remaining = AB_MAX_TRIES_REMAINING;
 	metadata_changed = true;
+
+	if (has_board_abc)
+		abc_board_setup(AB_MARK_SUCCESSFUL, slot);
 
 	log_info("Slot %c marked as successful", SLOT_NAME(slot));
 	return 0;
@@ -249,10 +407,15 @@ static int abc_mark_successful(int slot)
  *
  * Returns 0 on success, a negative error code on failure.
  */
-static int abc_set_active_boot(int slot)
+static int abc_mark_active(int slot)
 {
 	struct slot_metadata *slotp;
 	int slot1;
+
+	if (!metadata_loaded) {
+		log_error("%s: A/B metadata not loaded", __func__);
+		return -ENODATA;
+	}
 
 	if (slot > 2) {
 		log_error("Wrong slot value");
@@ -270,6 +433,9 @@ static int abc_set_active_boot(int slot)
 		slotp->priority = AB_MAX_PRIORITY - 1;
 	metadata_changed = true;
 
+	if (has_board_abc)
+		abc_board_setup(AB_MARK_ACTIVE, slot);
+
 	log_info("Slot %c marked as next active ", SLOT_NAME(slot));
 	return 0;
 }
@@ -281,15 +447,23 @@ static int abc_set_active_boot(int slot)
  *
  * Returns 0 on success, a negative error code on failure.
  */
-static int abc_set_unbootable(int slot)
+static int abc_mark_unbootable(int slot)
 {
 	struct slot_metadata *slotp = &abc_metadata.slot_info[slot];
+
+	if (!metadata_loaded) {
+		log_error("%s: A/B metadata not loaded", __func__);
+		return -ENODATA;
+	}
 
 	slotp->successful_boot = 0;
 	slotp->priority = 0;
 	slotp->tries_remaining = 0;
 
 	metadata_changed = true;
+
+	if (has_board_abc)
+		abc_board_setup(AB_MARK_UNBOOTABLE, slot);
 
 	log_info("Slot %c marked as unbootable", SLOT_NAME(slot));
 	return 0;
@@ -306,6 +480,11 @@ static int abc_check_bootable(int slot)
 {
 	struct slot_metadata *slotp = &abc_metadata.slot_info[slot];
 
+	if (!metadata_loaded) {
+		log_error("%s: A/B metadata not loaded", __func__);
+		return -ENODATA;
+	}
+
 	log_info("Slot %c marked as %s", SLOT_NAME(slot),
 				slotp->priority != 0 ? "bootable" : "unbootable");
 	return 0;
@@ -320,6 +499,11 @@ static int abc_check_bootable(int slot)
 static int abc_check_bootup_status(int slot)
 {
 	struct slot_metadata *slotp = &abc_metadata.slot_info[slot];
+
+	if (!metadata_loaded) {
+		log_error("%s: A/B metadata not loaded", __func__);
+		return -ENODATA;
+	}
 
 	log_info("Slot %c marked as %s", SLOT_NAME(slot),
 				slotp->successful_boot ? "successful" : "unsuccessful");
@@ -336,6 +520,11 @@ static int abc_check_bootup_status(int slot)
 static int abc_get_suffix(int slot)
 {
 	static const char* suffix[2] = {"_a", "_b"};
+
+	if (!metadata_loaded) {
+		log_error("%s: A/B metadata not loaded", __func__);
+		return -ENODATA;
+	}
 
 	if (slot > 2) {
 		log_error("Wrong SLOT");
@@ -362,6 +551,8 @@ void print_usage(const char *prog_name)
 	printf("  -b [SLOT]     Check if slot is bootable\n");
 	printf("  -s [SLOT]     Check if slot is marked successful\n");
 	printf("  -x [SLOT]     Get suffix\n");
+	printf("  -A            Allow direct write, bypassing redundant checks\n");
+	printf("  -S            Sync copy of redundant AB metadata\n");
 	printf("  -V            Set log level to verbose\n");
 	printf("  -h            Show help\n");
 	printf("  -v            Show version\n");
@@ -408,19 +599,19 @@ static void process_action(unsigned long option_bit, action_t action, const char
 static const char *get_action_name(action_t action)
 {
 	static const char *action_names[] = {
-		"GET_NUMBER_SLOTS",
-		"GET_CURRENT_SLOT",
-		"MARK_BOOT_SUCCESSFUL",
-		"SET_ACTIVE_BOOT_SLOT",
-		"SET_SLOT_AS_UNBOOTABLE",
-		"IS_SLOT_BOOTABLE",
-		"IS_SLOT_MARKED_SUCCESSFUL",
+		"GET_NUMBER",
+		"GET_CURRENT",
 		"GET_SUFFIX",
+		"MARK_BOOT_SUCCESSFUL",
+		"MARK_BOOT_ACTIVE",
+		"MARK_BOOT_UNBOOTABLE",
+		"IS_BOOTABLE",
+		"IS_SUCCESSFUL",
 		"DUMP_SLOT_INFO",
-		"GENERATE_DEFAULT_METADATA",
+		"GEN_DEFAULT",
 	};
 
-	if (action >= GET_NUMBER_SLOTS && action < ABC_COUNT) {
+	if (action >= GET_NUMBER && action < ABC_COUNT) {
 		return action_names[action];
 	} else {
 		return "UNKNOWN";
@@ -430,6 +621,11 @@ static const char *get_action_name(action_t action)
 static int abc_dump_slot_info(void)
 {
 	int i;
+
+	if (!metadata_loaded) {
+		log_error("%s: A/B metadata not loaded", __func__);
+		return -ENODATA;
+	}
 
 	printf("Slot Info:\n");
 	for (i = 0; i < abc_metadata.nb_slot; i++) {
@@ -449,8 +645,9 @@ int main(int argc, char *argv[])
 	const char *devices[MAX_DEVICES] = {NULL};
 	int device_count = 0;
 	bool device_loaded = false;
-	int dev_idx = -1;
 	int ret = EXIT_FAILURE;
+	bool first_initial = false;
+	bool sync_enabled = false;
 
 	log_set_level(LOG_INFO);
 
@@ -461,7 +658,7 @@ int main(int argc, char *argv[])
 
 	memset(action_list.actions, 0, sizeof(action_list.actions));
 
-	while ((opt = getopt(argc, argv, "hd:ncm:a:u:b:s:x:pgVv")) != -1) {
+	while ((opt = getopt(argc, argv, "hd:ncm:a:u:b:s:x:pgVvAS")) != -1) {
 		if (action_list.action_count >= MAX_ACTIONS) {
 			log_warn("Too many actions specified, ignoring option %c", opt);
 			continue;
@@ -480,35 +677,42 @@ int main(int argc, char *argv[])
 					log_warn("Too many devices specified, ignoring %s", optarg);
 				}
 				break;
+			case 'A':
+				allow_direct = true;
+				break;
+			case 'S':
+				sync_enabled = true;
+				break;
 			case 'n':
-				process_action(OPT_N, GET_NUMBER_SLOTS, NULL);
+				process_action(OPT_N, GET_NUMBER, NULL);
 				break;
 			case 'c':
-				process_action(OPT_C, GET_CURRENT_SLOT, NULL);
+				process_action(OPT_C, GET_CURRENT, NULL);
+				break;
+			case 'x':
+				process_action(OPT_X, GET_SUFFIX, optarg);
 				break;
 			case 'm':
 				process_action(OPT_M, MARK_BOOT_SUCCESSFUL, optarg);
 				break;
 			case 'a':
-				process_action(OPT_A, SET_ACTIVE_BOOT_SLOT, optarg);
+				process_action(OPT_A, MARK_BOOT_ACTIVE, optarg);
 				break;
 			case 'u':
-				process_action(OPT_U, SET_SLOT_AS_UNBOOTABLE, optarg);
+				process_action(OPT_U, MARK_BOOT_UNBOOTABLE, optarg);
 				break;
 			case 'b':
-				process_action(OPT_B, IS_SLOT_BOOTABLE, optarg);
+				process_action(OPT_B, IS_BOOTABLE, optarg);
 				break;
 			case 's':
-				process_action(OPT_S, IS_SLOT_MARKED_SUCCESSFUL, optarg);
-				break;
-			case 'x':
-				process_action(OPT_X, GET_SUFFIX, optarg);
+				process_action(OPT_S, IS_SUCCESSFUL, optarg);
 				break;
 			case 'p':
 				process_action(OPT_P, DUMP_SLOT_INFO, NULL);
 				break;
 			case 'g':
 				process_action(OPT_G, GEN_DEFAULT, NULL);
+				first_initial = true;
 				break;
 			case 'V':
 				log_set_level(LOG_DEBUG);
@@ -539,10 +743,10 @@ int main(int argc, char *argv[])
 		bool validate_slot = false;
 		action_params_t *action = &action_list.actions[i];
 		switch (action->action) {
-			case SET_ACTIVE_BOOT_SLOT:
-			case SET_SLOT_AS_UNBOOTABLE:
-			case IS_SLOT_BOOTABLE:
-			case IS_SLOT_MARKED_SUCCESSFUL:
+			case MARK_BOOT_ACTIVE:
+			case MARK_BOOT_UNBOOTABLE:
+			case IS_BOOTABLE:
+			case IS_SUCCESSFUL:
 			case GET_SUFFIX:
 			case MARK_BOOT_SUCCESSFUL:
 				validate_slot = true;
@@ -559,26 +763,49 @@ int main(int argc, char *argv[])
 	}
 
 	// Initialize and open the device, then read A/B metadata from the device
+	const char *udevices[MAX_DEVICES] = {NULL};
+	int udevice_count = 0;
 	for (int i = 0; i < device_count; i++) {
-		abc_fd = open(devices[i], O_RDWR);
-		if (abc_fd < 0) {
-			log_error("Could not open device %s: %s", devices[i], strerror(errno));
-			continue;
+		bool is_duplicate = false;
+		for (int j = 0; j < udevice_count; j++) {
+			if (strcmp(devices[i], udevices[j]) == 0) {
+				is_duplicate = true;
+				break;
+			}
 		}
-		if (abc_load(devices[i]) < 0) {
-			log_error("Could not load A/B metadata from '%s'", devices[i]);
-			close(abc_fd);
-			abc_fd = -1;
-		} else {
-			device_loaded = true;
-			dev_idx = i;
-			break;
+		if (!is_duplicate) {
+			udevices[udevice_count++] = devices[i];
 		}
 	}
 
-	if (!device_loaded) {
+	if (udevice_count > 2) {
+		log_error("More than 2 devices are not supported.");
+		return EXIT_FAILURE;
+	} else if (udevice_count == 2) {
+		if (abc_load_redund(udevices[0], udevices[1]) < 0) {
+			log_error("Could not load A/B metadata from redundant devices '%s' and '%s'",
+			          udevices[0], udevices[1]);
+		} else {
+			device_loaded = true;
+		}
+	} else if (udevice_count == 1) {
+		if (abc_load(udevices[0]) < 0) {
+			log_error("Could not load A/B metadata from '%s'", udevices[0]);
+		} else {
+			device_loaded = true;
+		}
+	}
+
+	if (!device_loaded && !first_initial) {
 		log_error("Unable to load A/B metadata");
 		return EXIT_FAILURE;
+	}
+
+	has_board_abc = abc_board_exists();
+	if (has_board_abc) {
+		log_warn("Board specific A/B control detected, using board-specific control.");
+	} else {
+		log_debug("No board specific A/B control detected.");
 	}
 
 	for (int i = 0; i < action_list.action_count; i++) {
@@ -586,10 +813,14 @@ int main(int argc, char *argv[])
 		action_t action_type = action->action;
 		int slot = action->slot;
 		switch (action_type) {
-		case GET_NUMBER_SLOTS:
-			log_info("Number of slots: %d", abc_metadata.nb_slot);
+		case GET_NUMBER:
+			ret = abc_get_number();
+			if (ret < 0) {
+				goto out;
+			}
+			log_info("Number of slots: %d", ret);
 			break;
-		case GET_CURRENT_SLOT:
+		case GET_CURRENT:
 			slot = abc_get_active_slot();
 			if (slot < 0) {
 				log_error("Invaild current active slot");
@@ -601,19 +832,19 @@ int main(int argc, char *argv[])
 			if (abc_mark_successful(slot) < 0)
 				goto out;
 			break;
-		case SET_ACTIVE_BOOT_SLOT:
-			if (abc_set_active_boot(slot) < 0)
+		case MARK_BOOT_ACTIVE:
+			if (abc_mark_active(slot) < 0)
 				goto out;
 			break;
-		case SET_SLOT_AS_UNBOOTABLE:
-			if (abc_set_unbootable(slot) < 0)
+		case MARK_BOOT_UNBOOTABLE:
+			if (abc_mark_unbootable(slot) < 0)
 				goto out;
 			break;
-		case IS_SLOT_BOOTABLE:
+		case IS_BOOTABLE:
 			if (abc_check_bootable(slot) < 0)
 				return EXIT_FAILURE;
 			break;
-		case IS_SLOT_MARKED_SUCCESSFUL:
+		case IS_SUCCESSFUL:
 			if (abc_check_bootup_status(slot) < 0)
 				return EXIT_FAILURE;
 			break;
@@ -643,18 +874,29 @@ out:
 		                offsetof(struct bootloader_control, crc32_le));
 		log_debug("Initial checksum: %.8x, current checksum: %.8x",
 		                initial_checksum, current_checksum);
-		if (current_checksum != initial_checksum) {
+		if (first_initial || current_checksum != initial_checksum) {
 			abc_metadata.crc32_le = current_checksum;
-			if (abc_store(devices[dev_idx], &abc_metadata) < 0) {
-				log_error("Unable to store A/B metadata");
-				ret = EXIT_FAILURE;
+			if (udevice_count == 2) {
+				if (abc_store_redund(udevices[0], udevices[1],
+				      &abc_metadata, sync_enabled) < 0) {
+					log_error("Unable to store A/B metadata to redundant devices");
+					ret = EXIT_FAILURE;
+				}
+			} else if (udevice_count == 1) {
+				log_warn("*************************** WARNING *****************************");
+				log_warn("With the redundant configuration, directly updating abc metadata");
+				log_warn("might break the CRC of the AB-specific bootloader message on");
+				log_warn("'%s'. Use with extreme caution.", udevices[0]);
+				log_warn("*****************************************************************");
+				if (allow_direct && abc_store(udevices[0], &abc_metadata) < 0) {
+					log_error("Unable to store A/B metadata");
+					ret = EXIT_FAILURE;
+				}
 			}
 		} else {
 			log_info("A/B metadata not changed, skip store");
 		}
 	}
 
-	if (abc_fd >= 0)
-		close_device(abc_fd);
 	return ret;
 }

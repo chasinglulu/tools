@@ -14,6 +14,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <ctype.h>
 
 #include "bootloader_message.h"
 #include "crc32.h"
@@ -36,6 +37,7 @@ uint32_t expected_crc32 = 0;
 static bool bcb_loaded = false;
 static bool bcb_changed = false;
 static int bcb_fd = -1;
+static bool allow_direct = false;
 
 static void print_usage(const char *prog_name) {
 	printf("%s [-h] [options]\n\n", prog_name);
@@ -48,6 +50,8 @@ static void print_usage(const char *prog_name) {
 	printf("  -t <field> <op> <val> Test  BCB <field> against <val>\n");
 	printf("  -p <field>            Dump  BCB <field>\n");
 	printf("  -P                    Dump all BCB fields\n");
+	printf("  -A                    Allow direct write, bypassing redundant checks\n");
+	printf("  -V                    Set log level to verbose\n");
 	printf("  -h                    Show this help message\n");
 	printf("\nLegend:\n");
 	printf("  <field> - one of {command,status,recovery,stage,reserved}\n");
@@ -67,12 +71,31 @@ static void print_usage(const char *prog_name) {
 	printf("\n");
 }
 
+static void print_field_if_printable(const char *name, const char *field, int size)
+{
+	bool has_printable = false;
+	for (int i = 0; i < size; i++) {
+		if (field[i] == '\0')
+			break;
+		if (isprint((unsigned char)field[i])) {
+			has_printable = true;
+			break;
+		}
+	}
+
+	if (has_printable) {
+		printf("  %-9s '%.*s'\n", name, size, field);
+	} else {
+		printf("  %-9s ''\n", name);
+	}
+}
+
 static void view_bcb(const struct bootloader_message *bcb) {
 	printf("BCB Content:\n");
-	printf("  Command:  '%.*s'\n", (int)sizeof(bcb->command), bcb->command);
-	printf("  Status:   '%.*s'\n", (int)sizeof(bcb->status), bcb->status);
-	printf("  Recovery: '%.*s'\n", (int)sizeof(bcb->recovery), bcb->recovery);
-	printf("  Stage:    '%.*s'\n", (int)sizeof(bcb->stage), bcb->stage);
+	print_field_if_printable("Command:", bcb->command, sizeof(bcb->command));
+	print_field_if_printable("Status:", bcb->status, sizeof(bcb->status));
+	print_field_if_printable("Recovery:", bcb->recovery, sizeof(bcb->recovery));
+	print_field_if_printable("Stage:", bcb->stage, sizeof(bcb->stage));
 }
 
 static const char *get_action_name(action_t action)
@@ -121,6 +144,58 @@ static int bcb_load(const char *device)
 	return 0;
 }
 
+static int bcb_load_redund(const char *device1, const char *device2)
+{
+	struct bootloader_message_ab *buffer;
+	int ret;
+	int fd1, fd2;
+
+	if (!device1 || !device2) {
+		log_error("Invalid device paths");
+		return -EINVAL;
+	}
+
+	buffer = malloc(sizeof(struct bootloader_message_ab));
+	if (!buffer) {
+		log_error("Out of memory for buffer");
+		return -ENOMEM;
+	}
+
+	fd1 = open(device1, O_RDWR);
+	if (fd1 < 0) {
+		log_error("Could not open device %s: %s", device1, strerror(errno));
+		free(buffer);
+		return -errno;
+	}
+
+	fd2 = open(device2, O_RDWR);
+	if (fd2 < 0) {
+		log_error("Could not open device %s: %s", device2, strerror(errno));
+		close(fd1);
+		free(buffer);
+		return -errno;
+	}
+
+	ret = bootloader_message_ab_load(fd1, fd2, 0, buffer);
+	if (ret < 0) {
+		log_error("Failed to load AB-specific bootloader message: %s", strerror(-ret));
+		free(buffer);
+		close(fd1);
+		close(fd2);
+		return ret;
+	}
+
+	memcpy(&bcb, &buffer->message, sizeof(bcb));
+	expected_crc32 = crc32((void *)&bcb, sizeof(bcb));
+	bcb_loaded = true;
+
+	free(buffer);
+	close(fd1);
+	close(fd2);
+
+	return 0;
+}
+
 /**
  * @brief Store BCB metadata to the device.
  *
@@ -141,6 +216,55 @@ static int bcb_store(const char *device, struct bootloader_message *bcb)
 	}
 
 	log_info("BCB metadata stored to '%s' successfully.", device);
+	return 0;
+}
+
+static int bcb_store_redund(const char *device1, const char *device2,
+			    struct bootloader_message *bcb)
+{
+	struct bootloader_message_ab bl_msg_ab;
+	int ret;
+	int fd1, fd2;
+
+	if (!device1 || !device2) {
+		log_error("Invalid device paths");
+		return -EINVAL;
+	}
+
+	fd1 = open(device1, O_RDWR);
+	if (fd1 < 0) {
+		log_error("Could not open device %s: %s", device1, strerror(errno));
+		return -errno;
+	}
+
+	fd2 = open(device2, O_RDWR);
+	if (fd2 < 0) {
+		log_error("Could not open device %s: %s", device2, strerror(errno));
+		close(fd1);
+		return -errno;
+	}
+
+	/* Load the whole message to preserve BCB metadata */
+	ret = bootloader_message_ab_load(fd1, fd2, 0, &bl_msg_ab);
+	if (ret < 0) {
+		log_warn("Could not load bootloader message, using empty one: %s",
+			 strerror(-ret));
+		memset(&bl_msg_ab, 0, sizeof(bl_msg_ab));
+	}
+
+	memcpy(&bl_msg_ab.message, bcb, sizeof(*bcb));
+
+	ret = bootloader_message_ab_store(fd1, fd2, 0, &bl_msg_ab, false);
+	if (ret < 0) {
+		log_error("Failed to store AB-specific bootloader message: %s", strerror(-ret));
+		close(fd1);
+		close(fd2);
+		return ret;
+	}
+
+	close(fd1);
+	close(fd2);
+
 	return 0;
 }
 
@@ -297,10 +421,23 @@ static int do_bcb_dump(action_params_t *action)
 		return -EINVAL;
 	}
 
-	if (is_zero)
+	if (is_zero) {
 		view_bcb(&bcb);
-	else
-		printf("%s: %.*s\n", action->field, size, field);
+	} else {
+		bool has_printable = false;
+		for (int i = 0; i < size; i++) {
+			if (field[i] == '\0')
+				break;
+			if (isprint((unsigned char)field[i])) {
+				has_printable = true;
+				break;
+			}
+		}
+		if (has_printable)
+			printf("%s: \"%.*s\"\n", action->field, size, field);
+		else
+			printf("%s: \"\"\n", action->field);
+	}
 
 	return 0;
 }
@@ -392,7 +529,6 @@ int main(int argc, char *argv[])
 {
 	const char *devices[MAX_DEVICES] = {NULL};
 	int device_count = 0;
-	int dev_idx = -1;
 	int opt;
 	int ret = EXIT_FAILURE;
 	bool device_loaded = false;
@@ -407,7 +543,7 @@ int main(int argc, char *argv[])
 
 	memset(action_list.actions, 0, sizeof(action_list.actions));
 
-	while ((opt = getopt(argc, argv, "d:s:c:Ct:p:Ph")) != -1) {
+	while ((opt = getopt(argc, argv, "d:s:c:Ct:p:PhAV")) != -1) {
 		if (action_list.action_count >= MAX_ACTIONS) {
 			log_warn("Too many actions specified, ignoring option %c", opt);
 			continue;
@@ -421,6 +557,12 @@ int main(int argc, char *argv[])
 				} else {
 					log_warn("Too many devices specified, ignoring %s", optarg);
 				}
+				break;
+			case 'A':
+				allow_direct = true;
+				break;
+			case 'V':
+				log_set_level(LOG_DEBUG);
 				break;
 			case 's':
 				log_debug("Set BCB field '%s' to '%s'\n", optarg, argv[optind]);
@@ -497,20 +639,43 @@ int main(int argc, char *argv[])
 	}
 
 	// Initialize and open the device, then read BCB metadata from the device
+	const char *unique_devices[MAX_DEVICES] = {NULL};
+	int unique_device_count = 0;
 	for (int i = 0; i < device_count; i++) {
-		bcb_fd = open(devices[i], O_RDWR);
-		if (bcb_fd < 0) {
-			log_error("Could not open device %s: %s", devices[i], strerror(errno));
-			continue;
+		bool is_duplicate = false;
+		for (int j = 0; j < unique_device_count; j++) {
+			if (strcmp(devices[i], unique_devices[j]) == 0) {
+				is_duplicate = true;
+				break;
+			}
 		}
-		if (bcb_load(devices[i]) < 0) {
-			log_error("Could not load BCB metadata from '%s'", devices[i]);
-			close(bcb_fd);
-			bcb_fd = -1;
+		if (!is_duplicate) {
+			unique_devices[unique_device_count++] = devices[i];
+		}
+	}
+
+	if (unique_device_count > 2) {
+		log_error("More than 2 devices are not supported.");
+		return EXIT_FAILURE;
+	} else if (unique_device_count == 2) {
+		if (bcb_load_redund(unique_devices[0], unique_devices[1]) < 0) {
+			log_error("Could not load BCB metadata from redundant devices '%s' and '%s'",
+				  unique_devices[0], unique_devices[1]);
 		} else {
 			device_loaded = true;
-			dev_idx = i;
-			break;
+		}
+	} else if (unique_device_count == 1) {
+		bcb_fd = open(unique_devices[0], O_RDWR);
+		if (bcb_fd < 0) {
+			log_error("Could not open device %s: %s", unique_devices[0], strerror(errno));
+		} else {
+			if (bcb_load(unique_devices[0]) < 0) {
+				log_error("Could not load BCB metadata from '%s'", unique_devices[0]);
+				close(bcb_fd);
+				bcb_fd = -1;
+			} else {
+				device_loaded = true;
+			}
 		}
 	}
 
@@ -552,9 +717,21 @@ out:
 	if (bcb_changed) {
 		uint32_t found_crc32 = crc32((uint8_t *)&bcb, sizeof(bcb));
 		if (found_crc32 != expected_crc32) {
-			if (bcb_store(devices[dev_idx], &bcb) < 0) {
-				log_error("Unable to store BCB metadata");
-				ret = EXIT_FAILURE;
+			if (unique_device_count == 2) {
+				if (bcb_store_redund(unique_devices[0], unique_devices[1], &bcb) < 0) {
+					log_error("Unable to store BCB metadata to redundant devices");
+					ret = EXIT_FAILURE;
+				}
+			} else if (unique_device_count == 1) {
+				log_warn("*************************** WARNING *****************************");
+				log_warn("With a redundant configuration, directly updating bcb metadata");
+				log_warn("might break the CRC of the AB-specific bootloader message on");
+				log_warn("'%s'. Use with extreme caution.", unique_devices[0]);
+				log_warn("*****************************************************************");
+				if (allow_direct && bcb_store(unique_devices[0], &bcb) < 0) {
+					log_error("Unable to store BCB metadata");
+					ret = EXIT_FAILURE;
+				}
 			}
 		} else {
 			log_info("BCB metadata not changed, skip store");
