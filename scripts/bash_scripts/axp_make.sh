@@ -9,6 +9,10 @@
 
 set -e
 
+# Determine BUILD_DIR based on script location relative to build directory
+# Assuming this script is in build/scripts/
+BUILD_DIR=$(cd "$(dirname "$0")/.." ; pwd)
+
 # Parse command line arguments
 parse_arguments() {
     while getopts "abcdghl:n:os:tuv:x" opt; do
@@ -79,10 +83,21 @@ debug() {
 # Generate AXP filename
 generate_axp_filename() {
     PROJECT=${PLATFORM#*\_}
-    debug "Generating AXP filename..."
     CHIP_NAME=${PROJECT%\_*}
-    VERSION_EXT=${VERSION}_$(date "+%Y%m%d%H%M%S")
+    HOME_PATH=$(cd $BUILD_DIR/..; pwd)
+    OUTPUT_PATH=$BUILD_DIR/out
+    TIMESTAMP_PATH=$OUTPUT_PATH/$PROJECT/timestamp
 
+    if [ -s "$TIMESTAMP_PATH" ]; then
+        BUILD_TIMESTAMP=$(cat "$TIMESTAMP_PATH")
+        debug "Using timestamp from file: $BUILD_TIMESTAMP"
+    else
+        BUILD_TIMESTAMP=$(date "+%Y%m%d%H%M")
+        debug "Timestamp file not found or empty, using current date: $BUILD_TIMESTAMP"
+    fi
+    VERSION_EXT=${VERSION}_${BUILD_TIMESTAMP}
+
+    debug "Generating AXP filename..."
     if [ -z "$SENSOR_MODEL" ]; then
         AXP_NAME=${PLATFORM}_${VERSION_EXT}
         [ -n "$LIBC_NAME" ] && AXP_NAME+=_${LIBC_NAME}
@@ -118,9 +133,6 @@ generate_sdcard_filename() {
 # Initialize paths
 initialize_paths() {
     debug "Initializing paths..."
-    LOCAL_PATH=$(pwd)
-    HOME_PATH=$LOCAL_PATH/..
-    OUTPUT_PATH=$LOCAL_PATH/out
     IMG_PATH=$OUTPUT_PATH/$PROJECT/images
     SAFE_IMG_PATH=$OUTPUT_PATH/$PROJECT/images/SafetyIsland
     ENV_PATH=$OUTPUT_PATH/$PROJECT/images/ota_env.txt
@@ -136,9 +148,10 @@ initialize_paths() {
     fi
 
     debug "Paths initialized:"
-    debug "  LOCAL_PATH=$LOCAL_PATH"
     debug "  HOME_PATH=$HOME_PATH"
+    debug "  BUILD_DIR=$BUILD_DIR"
     debug "  OUTPUT_PATH=$OUTPUT_PATH"
+    debug "  TIMESTAMP_PATH=$TIMESTAMP_PATH"
     debug "  IMG_PATH=$IMG_PATH"
     debug "  AXP_PATH=$AXP_PATH"
     debug "  SDIMG_PATH=$SDIMG_PATH"
