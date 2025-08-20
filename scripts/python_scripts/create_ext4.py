@@ -80,10 +80,13 @@ def create_ext4_image(options):
             size (str): Size of the image (default: 20M).
             volume_label (str, optional): Volume label for the image. Defaults to "".
             mke2fs (str, optional): Path to the mke2fs executable directory. Defaults to None.
+            selinux_context (str, optional): Path to the Selinux context file.
+            minimal (bool, optional): Use minimal mkfs parameters. Defaults to False.
     """
 
     mke2fs_cmd = None
     specific_mke2fs_path = options.get("mke2fs")
+    selinux_context_path = options.get("selinux_context")
 
     if specific_mke2fs_path:
         potential_cmd = os.path.join(specific_mke2fs_path, "mke2fs")
@@ -129,17 +132,34 @@ def create_ext4_image(options):
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
-    mkfs_command_parts = [
-        f'"{mke2fs_cmd}"', "-F", "-N", "0", "-O", "64bit",
-        "-d", f'"{options["source_dir"]}"',
-        "-m", "5", "-r", "1", "-t", "ext4"
-    ]
+    if options.get("minimal", False):
+        mkfs_command_parts = [
+            f'"{mke2fs_cmd}"', "-F",
+            "-N", "0",
+            "-O", "^has_journal",
+            "-b", "4096",
+            "-d", f'"{options["source_dir"]}"',
+            "-m", "0",
+            "-r", "1",
+            "-t", "ext4",
+            "-T", "small",
+            "-E", "lazy_itable_init=0,lazy_journal_init=0"
+        ]
+    else:
+        mkfs_command_parts = [
+            f'"{mke2fs_cmd}"', "-F", "-N", "0", "-O", "64bit",
+            "-d", f'"{options["source_dir"]}"',
+            "-m", "5", "-r", "1", "-t", "ext4"
+        ]
 
     if options.get("volume_label"):
         mkfs_command_parts += ["-L", f'"{options["volume_label"]}"']
 
     # Append output image and size at the end
-    mkfs_command_parts += [f'"{options["output_image"]}"', f'"{options["size"]}"']
+    size_str = str(options["size"])
+    if not re.search(r'[KMG]$', size_str, re.IGNORECASE):
+        size_str += "K"
+    mkfs_command_parts += [f'"{options["output_image"]}"', f'"{size_str}"']
 
     mkfs_command_str = ' '.join(mkfs_command_parts)
 
@@ -152,6 +172,8 @@ def create_ext4_image(options):
             # Ensure correct ownership within fakeroot environment
             tmp_script.write(f"chown -h -R 0:0 \"{options['source_dir']}\"\n")
             tmp_script.write("echo 'Running mke2fs within fakeroot ...'\n")
+            if selinux_context_path:
+                tmp_script.write(f"setfiles -r {options['source_dir']} {selinux_context_path} {options['source_dir']}\n")
             tmp_script.write(mkfs_command_str + "\n")
             tmp_script.write("echo 'mke2fs finished.'\n")
 
@@ -186,6 +208,53 @@ def create_ext4_image(options):
         if script_path and os.path.exists(script_path):
             os.remove(script_path)
 
+def get_dir_size_bytes(path):
+    """
+    Get the actual disk usage of a directory (in bytes).
+    """
+    try:
+        result = subprocess.run(['du', '-sb', path], capture_output=True, text=True, check=True)
+        size_str = result.stdout.split()[0]
+        return int(size_str)
+    except Exception as e:
+        print(f"Failed to get directory size: {e}")
+        sys.exit(1)
+
+def try_create_ext4_image(options, size_str):
+    """
+    Try to create an ext4 image with the specified size, return True if success.
+    """
+    options = options.copy()
+    options["size"] = size_str
+    try:
+        create_ext4_image(options)
+        return True
+    except SystemExit as e:
+        return False
+
+def auto_calc_min_ext4_size(options):
+    """
+    Automatically calculate the minimal ext4 image size and create the image.
+    """
+    dir_size = get_dir_size_bytes(options["source_dir"])
+    print(f"Actual disk usage of source directory: {dir_size} bytes")
+    # Start from actual size, increase by 1MB each time
+    min_size = dir_size
+    step = 512 * 1024
+    max_try = 40
+    for i in range(max_try):
+        size_bytes = min_size + i * step
+        size_str = f"{size_bytes // 1024}K"
+        print(f"Trying image size: {size_str}")
+        try:
+            create_ext4_image({**options, "size": size_str, "minimal": True})
+            print(f"Found minimal usable ext4 image size: {size_str}")
+            return
+        except SystemExit:
+            continue
+    print("Failed to find a suitable minimal ext4 image size, please check the source directory or parameters.")
+    sys.exit(1)
+
 def main():
     parser = argparse.ArgumentParser(description="Create an ext4 image from a directory using fakeroot.")
     parser.add_argument("-o", "--output", default="rootfs.ext4", dest="output_image", help="The output image filename (default: rootfs.ext4)")
@@ -193,6 +262,17 @@ def main():
     parser.add_argument("-l", "--label", default="", dest="volume_label", help="Volume label")
     parser.add_argument("-d", "--dir", required=True, dest="source_dir", help="Source directory")
     parser.add_argument("-m", "--mke2fs", dest="mke2fs", help="Path to the mke2fs executable directory")
+    parser.add_argument("-e", "--selinux", dest="selinux_context", help="Path to the Selinux context file")
+    parser.add_argument(
+        "-a", "--auto-min-size",
+        action="store_true",
+        help="Automatically calculate and use minimal ext4 image size"
+    )
+    parser.add_argument(
+        "-M", "--minimal",
+        action="store_true",
+        help="Use minimal mkfs parameters (for smallest image, normally used with --auto-min-size)"
+    )
 
     args = parser.parse_args()
 
@@ -206,7 +286,10 @@ def main():
          args.mke2fs = os.path.abspath(args.mke2fs)
 
     options = vars(args)
-    create_ext4_image(options)
+    if args.auto_min_size:
+        auto_calc_min_ext4_size(options)
+    else:
+        create_ext4_image(options)
 
 if __name__ == "__main__":
     main()
