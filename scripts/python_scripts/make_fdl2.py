@@ -1,21 +1,24 @@
-'''
-SPDX-License-Identifier: GPL-2.0+
-
-Description: This script creates a FDL2 file by combining two input files,
-             padding the second file with a specified header size and offset.
-
-Copyright (C) 2025 chasinglulu <wangkart@aliyun.com>
-
-'''
 #!/usr/bin/env python3
+#
+# SPDX-License-Identifier: GPL-2.0+
+#
+# creates a FDL2 file by combining two input files, padding the second
+# file with a specified header size and offset.
+#
+# Copyright (C) 2025 chasinglulu <wangkart@aliyun.com>
+#
 
 import sys
 import optparse
+import subprocess
+import os
+import struct
+import gzip as gzip_module
 from typing import Tuple
 
 # Constants definition
 DEFAULT_SIZEOF_HEADER = 0x600
-DEFAULT_OFFSET = 0x40000
+DEFAULT_OFFSET = 0x80000
 
 def parse_command_line_arguments() -> Tuple[optparse.Values, list]:
     """Parse command line arguments."""
@@ -25,27 +28,47 @@ def parse_command_line_arguments() -> Tuple[optparse.Values, list]:
     parser.add_option("-s", "--size", action="store", type="int", dest="sizeof_header", help="SPL header size")
     parser.add_option("-e", "--offset", action="store", type="int", dest="offset", help="SPL start address offset")
     parser.add_option("-v", "--verbose", action="store_true", dest="verbose", help="Enable verbose output")
+    parser.add_option("-z", "--gzip", action="store_true", dest="gzip", help="Enable gzip compression for inputfile2")
 
-    parser.set_defaults(sizeof_header=DEFAULT_SIZEOF_HEADER, offset=DEFAULT_OFFSET, verbose=False)
+    parser.set_defaults(sizeof_header=DEFAULT_SIZEOF_HEADER, offset=DEFAULT_OFFSET, verbose=False, gzip=False)
 
     return parser.parse_args()
 
 
 def validate_options(opts: optparse.Values) -> None:
     """Validate command line arguments."""
-    if not isinstance(opts.sizeof_header, int) or opts.sizeof_header < 0:
+    if not isinstance(opts.sizeof_header, int) or opts.sizeof_header <= 0:
         raise ValueError("sizeof_header must be a positive integer")
     if not isinstance(opts.offset, int) or opts.offset < 0:
         raise ValueError("offset must be a non-negative integer")
 
 
-def create_fdl2(outfile: str, sizeof_header: int, offset: int, infile1: str, infile2: str) -> None:
+def create_fdl2(outfile: str, sizeof_header: int, offset: int, infile1: str, infile2: str, use_gzip: bool) -> None:
     """Create FDL2 file."""
     try:
         with open(infile1, "rb") as f1:
-            data1 = f1.read()
-        with open(infile2, "rb") as f2:
-            data2 = f2.read()
+            data1 = bytearray(f1.read())
+
+        if use_gzip:
+            try:
+                # Try to use external gzip command first
+                subprocess.run(['gzip', '-f', '-k', infile2], check=True, capture_output=True)
+                compressed_infile2_path = infile2 + ".gz"
+                with open(compressed_infile2_path, "rb") as f2:
+                    compressed_data = f2.read()
+                if os.path.exists(compressed_infile2_path):
+                    os.remove(compressed_infile2_path)
+            except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                print(f"External gzip command failed ({e}), falling back to python's gzip module.")
+                with open(infile2, "rb") as f2_in:
+                    uncompressed_data = f2_in.read()
+                compressed_data = gzip_module.compress(uncompressed_data)
+
+            # Prepend compressed data with its size (4 bytes, little-endian)
+            data2 = struct.pack('<I', len(compressed_data)) + compressed_data
+        else:
+            with open(infile2, "rb") as f2:
+                data2 = f2.read()
 
         with open(outfile, "wb+") as outfile_obj:
             outfile_obj.write(data1)
@@ -59,6 +82,9 @@ def create_fdl2(outfile: str, sizeof_header: int, offset: int, infile1: str, inf
         raise
     except IOError as e:
         print(f"IO error: {e}")
+        raise
+    except subprocess.CalledProcessError as e:
+        print(f"Error during gzip compression of {infile2}: {e.stderr.decode()}")
         raise
 
 
@@ -75,8 +101,10 @@ def main() -> None:
         if opts.verbose:
             print("Inputfile list: %s" % ' '.join(args))
             print("Size of header: 0x%X, Offset: 0x%x" % (opts.sizeof_header, opts.offset))
+            if opts.gzip:
+                print("Gzip compression for %s is enabled" % args[1])
 
-        create_fdl2(opts.outfile, opts.sizeof_header, opts.offset, args[0], args[1])
+        create_fdl2(opts.outfile, opts.sizeof_header, opts.offset, args[0], args[1], opts.gzip)
 
     except ValueError as e:
         print(f"Parameter error: {e}")
