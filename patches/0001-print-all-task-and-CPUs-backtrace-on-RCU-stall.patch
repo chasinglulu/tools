@@ -1,0 +1,73 @@
+From db8805b8303002076c6ee1c8ca66fc42bb19a112 Mon Sep 17 00:00:00 2001
+From: wangxinlu <wangxinlu@axera-tech.com>
+Date: Mon, 25 Dec 2023 19:31:46 +0800
+Subject: [PATCH] print all task and CPUs backtrace on RCU stall
+
+Change-Id: I8dde80df2855ec3d846b340126379a3bd4e80a47
+---
+ linux-5.15.73/kernel/sched/core.c | 47 +++++++++++++++++++++++++++++--
+ 1 file changed, 45 insertions(+), 2 deletions(-)
+
+diff --git a/linux-5.15.73/kernel/sched/core.c b/linux-5.15.73/kernel/sched/core.c
+index 85be68468..1a4b87b8c 100644
+--- a/linux-5.15.73/kernel/sched/core.c
++++ b/linux-5.15.73/kernel/sched/core.c
+@@ -10873,10 +10873,53 @@ struct cgroup_subsys cpu_cgrp_subsys = {
+ 
+ #endif	/* CONFIG_CGROUP_SCHED */
+ 
++#ifdef CONFIG_SMP
++static DEFINE_RAW_SPINLOCK(show_lock);
++
++static void show_other_cpu_stack(void *dummy)
++{
++	unsigned long flags;
++
++	/* Idle CPUs have no interesting backtrace. */
++	if (idle_cpu(smp_processor_id())) {
++		pr_info("CPU%d: backtrace skipped as idling\n", smp_processor_id());
++		return;
++	}
++
++	raw_spin_lock_irqsave(&show_lock, flags);
++	pr_info("CPU%d:\n", smp_processor_id());
++	show_stack(NULL, NULL, KERN_INFO);
++	raw_spin_unlock_irqrestore(&show_lock, flags);
++}
++
++static void sysrq_showregs_othercpus(struct work_struct *dummy)
++{
++	smp_call_function(show_other_cpu_stack, NULL, 0);
++}
++
++static DECLARE_WORK(sysrq_showallcpus, sysrq_showregs_othercpus);
++#endif
++
+ void dump_cpu_task(int cpu)
+ {
+-	pr_info("Task dump for CPU %d:\n", cpu);
+-	sched_show_task(cpu_curr(cpu));
++	struct pt_regs *regs = NULL;
++
++	if (in_hardirq())
++		regs = get_irq_regs();
++
++	pr_info("CPU%d:\n", smp_processor_id());
++	if (regs)
++		show_regs(regs);
++	else
++		show_stack(NULL, NULL, KERN_INFO);
++
++	schedule_work(&sysrq_showallcpus);
++	// pr_info("Task dump for CPU %d:\n", cpu);
++	// sched_show_task(cpu_curr(cpu));
++
++	pr_info("show all task states:\n");
++	show_state();
++	show_workqueue_state();
+ }
+ 
+ /*
+-- 
+2.25.1
+
